@@ -1,0 +1,24 @@
+{
+  "name": "testitnow-backend",
+  "version": "1.0.0",
+  "description": "TestItNow API – Vercel Serverless + Neon PostgreSQL",
+  "type": "module",
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'No build step for serverless'",
+    "lint": "eslint api lib",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.9.3",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "vercel": "^34.0.0"
+  }
+}
