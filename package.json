@@ -6,7 +6,7 @@
   "engines": { "node": ">=20.0.0" },
   "scripts": {
     "dev": "vercel dev",
-    "build": "echo 'No build step for serverless'",
+    "build": "node scripts/build.js",
     "lint": "eslint api lib",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js"
