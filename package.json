@@ -11,6 +11,9 @@
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js"
   },
+  {
+  "outputDirectory": "build"
+},
   "dependencies": {
     "@neondatabase/serverless": "^0.9.3",
     "bcryptjs": "^2.4.3",
