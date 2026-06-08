@@ -378,100 +378,99 @@ export default function App() {
           {/* ── BUGS DASHBOARD ── */}
           {bugs.length > 0 && <BugsDashboard bugs={bugs} />}
 
-        </div>
+        </div>{/* end max-w-7xl */}
+        </div>{/* end min-h-screen */}
+      )}{/* end currentView === 'main' */}
 
-        {/* ══ MODALS ══════════════════════════════════════════════ */}
+      {/* ══ MODALS — rendered outside page divs so z-index works ══ */}
 
-        {modal === 'auth' && (
-          <Modal onClose={() => setModal(null)}>
-            <AuthModal
-              mode={authMode}
-              onLogin={handleLogin}
-              onSignup={handleSignup}
-              onToggle={() => setAuthMode(m => m === 'login' ? 'signup' : 'login')}
-            />
-          </Modal>
-        )}
+      {modal === 'auth' && (
+        <Modal onClose={() => setModal(null)}>
+          <AuthModal
+            mode={authMode}
+            onLogin={handleLogin}
+            onSignup={handleSignup}
+            onToggle={() => setAuthMode(m => m === 'login' ? 'signup' : 'login')}
+          />
+        </Modal>
+      )}
 
-        {modal === 'upgrade' && (
-          <Modal onClose={() => setModal(null)} wide>
-            <UpgradeModal currentPlan={userPlan} onSelect={() => setModal('payment')} />
-          </Modal>
-        )}
+      {modal === 'upgrade' && (
+        <Modal onClose={() => setModal(null)} wide>
+          <UpgradeModal currentPlan={userPlan} onSelect={() => setModal('payment')} />
+        </Modal>
+      )}
 
-        {modal === 'payment' && (
-          <Modal onClose={() => setModal(null)}>
-            <PaymentModal
-              currentPlan={userPlan}
-              onSuccess={handlePaymentSuccess}
-              onClose={() => setModal(null)}
-            />
-          </Modal>
-        )}
+      {modal === 'payment' && (
+        <Modal onClose={() => setModal(null)}>
+          <PaymentModal
+            currentPlan={userPlan}
+            onSuccess={handlePaymentSuccess}
+            onClose={() => setModal(null)}
+          />
+        </Modal>
+      )}
 
-        {modal === 'analyze' && (
-          <Modal onClose={() => !isGenerating && setModal(null)}>
-            <AnalyzeModal
-              isGenerating={isGenerating}
-              progress={analysisProgress}
-              progressMsg={analysisMsg}
-              needsAuth={needsAuth}
-              authCredentials={authCredentials}
-              onNeedsAuthToggle={() => setNeedsAuth(p => !p)}
-              onAuthCredChange={setAuthCredentials}
-              onAnalyze={handleAnalyze}
-              onCancel={() => setModal(null)}
-            />
-          </Modal>
-        )}
+      {modal === 'analyze' && (
+        <Modal onClose={() => !isGenerating && setModal(null)}>
+          <AnalyzeModal
+            isGenerating={isGenerating}
+            progress={analysisProgress}
+            progressMsg={analysisMsg}
+            needsAuth={needsAuth}
+            authCredentials={authCredentials}
+            onNeedsAuthToggle={() => setNeedsAuth(p => !p)}
+            onAuthCredChange={setAuthCredentials}
+            onAnalyze={handleAnalyze}
+            onCancel={() => setModal(null)}
+          />
+        </Modal>
+      )}
 
-        {modal === 'import' && (
-          <Modal onClose={() => setModal(null)} wide>
-            <ImportModal
-              importSource={importSource}
-              azureConfig={azureConfig}
-              onSourceChange={setImportSource}
-              onAzureConfigChange={setAzureConfig}
-              onCSVUpload={handleCSVUpload}
-              onAzureImport={handleAzureImport}
-              onAzureExport={handleAzureExport}
-              onDownloadTemplate={() => {
-                const csv = '\uFEFF' + integrationsService.getCSVTemplate();
-                const blob = new Blob([csv], { type: 'text/csv' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = 'template.csv'; a.click();
-              }}
-              totalTests={totalTests}
-              onClose={() => setModal(null)}
-            />
-          </Modal>
-        )}
+      {modal === 'import' && (
+        <Modal onClose={() => setModal(null)} wide>
+          <ImportModal
+            importSource={importSource}
+            azureConfig={azureConfig}
+            onSourceChange={setImportSource}
+            onAzureConfigChange={setAzureConfig}
+            onCSVUpload={handleCSVUpload}
+            onAzureImport={handleAzureImport}
+            onAzureExport={handleAzureExport}
+            onDownloadTemplate={() => {
+              const csv = '\uFEFF' + integrationsService.getCSVTemplate();
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a'); a.href = url; a.download = 'template.csv'; a.click();
+            }}
+            totalTests={totalTests}
+            onClose={() => setModal(null)}
+          />
+        </Modal>
+      )}
 
-        {modal === 'jira' && (
-          <Modal onClose={() => setModal(null)}>
-            <JiraModal
-              action={jiraAction}
-              config={jiraConfig}
-              onChange={setJiraConfig}
-              onImport={handleJiraImport}
-              onExport={handleJiraExport}
-              onClose={() => setModal(null)}
-            />
-          </Modal>
-        )}
+      {modal === 'jira' && (
+        <Modal onClose={() => setModal(null)}>
+          <JiraModal
+            action={jiraAction}
+            config={jiraConfig}
+            onChange={setJiraConfig}
+            onImport={handleJiraImport}
+            onExport={handleJiraExport}
+            onClose={() => setModal(null)}
+          />
+        </Modal>
+      )}
 
-        {modal === 'bug' && selectedFailedTest && (
-          <Modal onClose={() => { setModal(null); setSelectedFailedTest(null); }}>
-            <BugModal
-              test={selectedFailedTest}
-              onSubmit={handleCreateBug}
-              onCancel={() => { setModal(null); setSelectedFailedTest(null); }}
-            />
-          </Modal>
-        )}
-      </div>
-      </div>
-      )} {/* end currentView === 'main' */}
+      {modal === 'bug' && selectedFailedTest && (
+        <Modal onClose={() => { setModal(null); setSelectedFailedTest(null); }}>
+          <BugModal
+            test={selectedFailedTest}
+            onSubmit={handleCreateBug}
+            onCancel={() => { setModal(null); setSelectedFailedTest(null); }}
+          />
+        </Modal>
+      )}
     </>
   );
 }
