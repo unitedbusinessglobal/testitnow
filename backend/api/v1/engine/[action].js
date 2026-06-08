@@ -1,14 +1,14 @@
 // ============================================================
 // api/v1/engine/[action].js — Test Engine API (Vercel)
 // Uses real HTML crawler + comprehensive generator.
-// Generates 200+ test cases per page, all pages discovered.
+// Bulk INSERT for speed — all tests saved in one query per type.
 // Only test RUNS are limited by plan.
 // ============================================================
 
-import { query }                                   from '../../../lib/db.js';
-import { requireAuth, setCors }               from '../../../lib/auth.js';
-import { discoverPages, fetchPage, parsePageElements } from '../../../lib/crawler.js';
-import { generateAllTestCases, resetCounter } from '../../../lib/testGenerator.js';
+import { query }                                              from '../../../lib/db.js';
+import { requireAuth, setCors }                               from '../../../lib/auth.js';
+import { discoverPages, fetchPage, parsePageElements }        from '../../../lib/crawler.js';
+import { generateAllTestCases, resetCounter }                 from '../../../lib/testGenerator.js';
 
 export default async function handler(req, res) {
   if (setCors(req, res)) return;
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: `Unknown action: ${action}` });
     }
   } catch (err) {
-    console.error(`[engine/${action}]`, err.message, err.stack?.split('\n')[1]);
+    console.error(`[engine/${action}]`, err.message);
     return res.status(500).json({ error: 'Internal server error', detail: err.message });
   }
 }
@@ -44,86 +44,119 @@ async function analyze(req, res, decoded) {
   try { urlObj = new URL(url); }
   catch { return res.status(400).json({ error: 'Invalid URL — must start with https://' }); }
 
-  console.log(`[analyze] Starting crawl of ${url} (maxPages: ${maxPages})`);
-
-  // ── Step 1: Crawl the site ─────────────────────────────────
+  // ── Step 1: Crawl the site ────────────────────────────────
   let pages = [];
   try {
     pages = await discoverPages(url, Math.min(maxPages, 20));
     console.log(`[analyze] Crawled ${pages.length} pages`);
-  } catch (crawlErr) {
-    console.warn('[analyze] Crawl failed, using fallback:', crawlErr.message);
+  } catch (e) {
+    console.warn('[analyze] Crawl failed:', e.message);
   }
 
-  // Fallback: if crawl failed or returned no pages, try just the root
   if (pages.length === 0) {
-    console.log('[analyze] Fallback: fetching root page only');
     const { html, ok, finalUrl } = await fetchPage(url);
-    if (ok && html) {
-      pages = [parsePageElements(html, finalUrl || url)];
-    }
+    if (ok && html) pages = [parsePageElements(html, finalUrl || url)];
   }
 
-  // If still no pages, generate from URL structure alone
   if (pages.length === 0) {
-    console.log('[analyze] No pages fetched, generating from URL structure');
     pages = [{ elements: getDefaultElements(), title: urlObj.hostname, url }];
   }
 
-  console.log(`[analyze] Generating test cases for ${pages.length} pages`);
-
-  // ── Step 2: Generate test cases ───────────────────────────
+  // ── Step 2: Generate all test cases ──────────────────────
   resetCounter();
-  const generated = generateAllTestCases(pages, authCredentials);
-
+  const generated     = generateAllTestCases(pages, authCredentials);
   const totalGenerated = Object.values(generated).reduce((s, a) => s + a.length, 0);
-  console.log(`[analyze] Generated ${totalGenerated} test cases across ${pages.length} pages`);
+  console.log(`[analyze] Generated ${totalGenerated} test cases`);
 
-  // ── Step 3: Persist to Neon using direct HTTP queries ───────
+  // ── Step 3: Bulk INSERT — one query per type ──────────────
+  // Much faster than one query per row — avoids timeout with 500+ tests
   const saved = { unit: [], api: [], database: [], performance: [], security: [], ui: [] };
   let savedCount = 0;
 
   for (const [type, list] of Object.entries(generated)) {
-    // Insert in chunks of 20 to stay well within Vercel's 60s timeout
-    const chunks = chunkArray(list, 20);
+    if (!list.length) continue;
+
+    // Build bulk INSERT in chunks of 100 rows
+    const chunks = chunkArray(list, 100);
+
     for (const chunk of chunks) {
-      for (const tc of chunk) {
-        const key = tc.id
-          ? tc.id.substring(0, 99)
-          : `${projectId.substring(0,8).toUpperCase()}-${type.toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-        try {
-          const { rows } = await query(
-            `INSERT INTO test_cases
-               (test_case_key, project_id, test_case_type, summary, description,
-                preconditions, test_steps, test_data, expected_result, priority, status, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Draft',$11)
-             ON CONFLICT (test_case_key) DO UPDATE
-               SET summary = EXCLUDED.summary, updated_at = NOW()
-             RETURNING test_case_id, test_case_key`,
-            [
-              key, projectId, type,
-              (tc.name || 'Unnamed test').substring(0, 499),
-              tc.description   ? tc.description.substring(0, 2000)   : null,
-              tc.preconditions ? tc.preconditions.substring(0, 1000) : null,
-              tc.testSteps     ? JSON.stringify({ steps: tc.testSteps.split(' | ') }) : null,
-              tc.testData      ? JSON.stringify({ data: tc.testData }) : null,
-              tc.expectedResult ? tc.expectedResult.substring(0, 2000) : null,
-              tc.priority || 'Medium',
-              decoded.userId,
-            ],
+      try {
+        // Build parameterised bulk insert
+        const values = [];
+        const params = [];
+        let   pIdx   = 1;
+
+        for (const tc of chunk) {
+          const key = (tc.id || `${projectId.substring(0,8).toUpperCase()}-${type.toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`).substring(0, 99);
+          values.push(`($${pIdx},$${pIdx+1},$${pIdx+2},$${pIdx+3},$${pIdx+4},$${pIdx+5},$${pIdx+6},$${pIdx+7},$${pIdx+8},$${pIdx+9},'Draft',$${pIdx+10})`);
+          params.push(
+            key,
+            projectId,
+            type,
+            (tc.name || 'Unnamed').substring(0, 499),
+            tc.description   ? tc.description.substring(0, 2000)   : null,
+            tc.preconditions ? tc.preconditions.substring(0, 1000) : null,
+            tc.testSteps     ? JSON.stringify({ steps: tc.testSteps.split(' | ') }) : null,
+            tc.testData      ? JSON.stringify({ data: tc.testData })                : null,
+            tc.expectedResult ? tc.expectedResult.substring(0, 2000)               : null,
+            tc.priority || 'Medium',
+            decoded.userId,
           );
-          saved[type].push({ ...tc, dbId: rows[0].test_case_id, dbKey: rows[0].test_case_key });
-          savedCount++;
-        } catch (e) {
-          if (!e.message.includes('duplicate') && !e.message.includes('unique')) {
-            console.warn(`[analyze] Insert warning (${type}): ${e.message.substring(0, 100)}`);
+          pIdx += 11;
+        }
+
+        const { rows } = await query(
+          `INSERT INTO test_cases
+             (test_case_key, project_id, test_case_type, summary, description,
+              preconditions, test_steps, test_data, expected_result, priority, status, created_by)
+           VALUES ${values.join(',')}
+           ON CONFLICT (test_case_key) DO UPDATE
+             SET summary = EXCLUDED.summary, updated_at = NOW()
+           RETURNING test_case_id, test_case_key, summary, priority`,
+          params,
+        );
+
+        // Map returned rows back to test objects
+        rows.forEach((row, i) => {
+          saved[type].push({
+            ...chunk[i],
+            dbId:  row.test_case_id,
+            dbKey: row.test_case_key,
+          });
+        });
+        savedCount += rows.length;
+        console.log(`[analyze] Saved ${rows.length} ${type} tests`);
+
+      } catch (e) {
+        console.error(`[analyze] Bulk insert error (${type}):`, e.message.substring(0, 150));
+        // Fall back to individual inserts for this chunk
+        for (const tc of chunk) {
+          const key = (tc.id || `${type.toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`).substring(0, 99);
+          try {
+            const { rows } = await query(
+              `INSERT INTO test_cases
+                 (test_case_key, project_id, test_case_type, summary, priority, status, created_by)
+               VALUES ($1,$2,$3,$4,$5,'Draft',$6)
+               ON CONFLICT (test_case_key) DO NOTHING
+               RETURNING test_case_id, test_case_key`,
+              [key, projectId, type, (tc.name||'Test').substring(0,499), tc.priority||'Medium', decoded.userId],
+            );
+            if (rows.length) {
+              saved[type].push({ ...tc, dbId: rows[0].test_case_id, dbKey: rows[0].test_case_key });
+              savedCount++;
+            } else {
+              saved[type].push(tc);
+            }
+          } catch {
+            saved[type].push(tc); // include in response even without DB id
           }
-          // Still include in response even if not saved to DB
-          saved[type].push(tc);
         }
       }
     }
   }
+
+  const breakdown = Object.fromEntries(Object.entries(saved).map(([k,v]) => [k, v.length]));
+  console.log(`[analyze] Final breakdown:`, JSON.stringify(breakdown));
 
   return res.status(200).json({
     success: true,
@@ -131,14 +164,12 @@ async function analyze(req, res, decoded) {
     generated: saved,
     meta: {
       url,
-      domain:          urlObj.hostname,
-      pagesAnalyzed:   pages.length,
-      pagesTitles:     pages.map(p => p.title).slice(0, 20),
+      domain:        urlObj.hostname,
+      pagesAnalyzed: pages.length,
+      pagesTitles:   pages.map(p => p.title).slice(0, 20),
       totalGenerated,
-      savedToDB:       savedCount,
-      breakdown: Object.fromEntries(
-        Object.entries(saved).map(([k, v]) => [k, v.length])
-      ),
+      savedToDB:     savedCount,
+      breakdown,
     },
   });
 }
@@ -245,15 +276,14 @@ function chunkArray(arr, size) {
 
 function getDefaultElements() {
   return {
-    forms:      [{ id: 'main-form', action: '/', method: 'POST', fields: [
+    forms: [{ id: 'main-form', action: '/', method: 'POST', fields: [
       { name: 'email', type: 'email', required: true },
       { name: 'password', type: 'password', required: true },
     ]}],
-    inputs:     [{ name: 'email', type: 'email', required: true }],
-    buttons:    [{ text: 'Submit', type: 'submit' }, { text: 'Login', type: 'submit' }],
-    links:      [], selects: [], tables: [], navItems: [],
-    headings:   [{ level: 1, text: 'Home' }],
-    images:     [], modals: [], checkboxes: [], radios: [],
-    textareas:  [], fileInputs: [], pagination: [], tabs: [], accordions: [],
+    inputs: [], buttons: [{ text: 'Submit', type: 'submit' }],
+    links: [], selects: [], tables: [], navItems: [],
+    headings: [{ level: 1, text: 'Home' }],
+    images: [], modals: [], checkboxes: [], radios: [],
+    textareas: [], fileInputs: [], pagination: [], tabs: [], accordions: [],
   };
 }

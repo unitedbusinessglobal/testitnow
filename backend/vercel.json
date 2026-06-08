@@ -18,12 +18,13 @@
     }
   ],
   "functions": {
-    "api/health.js":                    { "maxDuration": 10 },
-    "api/v1/auth/[action].js":         { "maxDuration": 30 },
-    "api/v1/bugs/[action].js":         { "maxDuration": 30 },
-    "api/v1/integrations/[action].js": { "maxDuration": 30 },
-    "api/v1/projects/index.js":        { "maxDuration": 30 },
-    "api/v1/reporting/[action].js":    { "maxDuration": 30 },
-    "api/v1/engine/[action].js":       { "maxDuration": 60 }
+    "api/health.js":                    { "maxDuration": 10  },
+    "api/v1/auth/[action].js":         { "maxDuration": 30  },
+    "api/v1/bugs/[action].js":         { "maxDuration": 30  },
+    "api/v1/integrations/[action].js": { "maxDuration": 30  },
+    "api/v1/projects/index.js":        { "maxDuration": 30  },
+    "api/v1/reporting/[action].js":    { "maxDuration": 30  },
+    "api/v1/payments/create-intent.js":{ "maxDuration": 30  },
+    "api/v1/engine/[action].js":       { "maxDuration": 300 }
   }
 }
