@@ -1,7 +1,6 @@
 // ============================================================
 // src/services/testEngineService.js  (Frontend — Netlify)
 // Calls: Vercel backend  /api/v1/engine/[action]
-// Neon tables: test_cases, test_executions
 // ============================================================
 
 import { SERVICES } from '../config/services';
@@ -26,57 +25,74 @@ async function apiFetch(path, options = {}) {
 
 export const testEngineService = {
 
-  // ── Analyze website + generate + persist test cases ────────
   async analyzeAndGenerate(url, authCredentials = null, onProgress) {
-    // Fire progress ticks while the backend works
+    // Animate progress while waiting for backend crawl
+    let pct = 5;
+    const msgs = [
+      'Connecting to website…',
+      'Crawling pages…',
+      'Parsing navigation menus…',
+      'Extracting form elements…',
+      'Analysing input fields…',
+      'Discovering buttons & links…',
+      'Scanning tables & dropdowns…',
+      'Checking images & media…',
+      'Identifying security surfaces…',
+      'Generating test cases…',
+      'Saving to database…',
+    ];
+    let msgIdx = 0;
     const progressInterval = setInterval(() => {
-      if (onProgress) onProgress(Math.min(90, Math.random() * 30 + 30), 'Analyzing…');
-    }, 900);
+      pct = Math.min(90, pct + Math.random() * 8);
+      if (onProgress) onProgress(Math.round(pct), msgs[msgIdx % msgs.length]);
+      msgIdx++;
+    }, 1500);
 
     try {
-      // Retrieve or create default project
-      const projRes = await fetch(
-        `${SERVICES.auth.BASE_URL}/api/${SERVICES.auth.version}/projects`,
-        { headers: { Authorization: `Bearer ${tokenStore.get()}` } },
-      );
+      // Get or create project
       let projectId = null;
-      if (projRes.ok) {
-        const projData = await projRes.json();
-        projectId = projData.projects?.[0]?.project_id || null;
-      }
-      // Auto-create project if none exists
-      if (!projectId) {
-        const createRes = await fetch(
+      try {
+        const projRes = await fetch(
           `${SERVICES.auth.BASE_URL}/api/${SERVICES.auth.version}/projects`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${tokenStore.get()}`,
-            },
-            body: JSON.stringify({ projectName: new URL(url).hostname }),
-          },
+          { headers: { Authorization: `Bearer ${tokenStore.get()}` } },
         );
-        if (createRes.ok) {
-          const d = await createRes.json();
-          projectId = d.project?.project_id || null;
+        if (projRes.ok) {
+          const d = await projRes.json();
+          projectId = d.projects?.[0]?.project_id || null;
         }
+      } catch {}
+
+      if (!projectId) {
+        try {
+          const createRes = await fetch(
+            `${SERVICES.auth.BASE_URL}/api/${SERVICES.auth.version}/projects`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenStore.get()}` },
+              body: JSON.stringify({ projectName: new URL(url).hostname }),
+            },
+          );
+          if (createRes.ok) {
+            const d = await createRes.json();
+            projectId = d.project?.project_id || null;
+          }
+        } catch {}
       }
 
-      if (onProgress) onProgress(10, 'Fetching website structure…');
+      if (onProgress) onProgress(10, 'Starting deep crawl…');
 
       const data = await apiFetch('analyze', {
         method: 'POST',
-        body: { url, projectId, authCredentials },
+        body: { url, projectId, authCredentials, maxPages: 20 },
       });
 
       clearInterval(progressInterval);
-      if (onProgress) onProgress(100, 'Complete!');
+      if (onProgress) onProgress(100, `Complete! ${data.meta?.totalGenerated || 0} test cases generated`);
 
       return {
-        domain: data.meta?.domain || new URL(url).hostname,
+        domain:    data.meta?.domain || new URL(url).hostname,
         generated: data.generated,
-        meta: data.meta,
+        meta:      data.meta,
       };
     } catch (err) {
       clearInterval(progressInterval);
@@ -84,25 +100,16 @@ export const testEngineService = {
     }
   },
 
-  // ── Run a list of tests, stream results via callback ───────
   async runTests(testList, onTestComplete) {
-    const data = await apiFetch('run', {
-      method: 'POST',
-      body: { tests: testList },
-    });
-
-    // Simulate streaming: fire callback for each result
+    const data = await apiFetch('run', { method: 'POST', body: { tests: testList } });
     for (const result of data.results) {
-      await new Promise(r => setTimeout(r, 120));
-      // Generate a client-side screenshot placeholder
+      await new Promise(r => setTimeout(r, 60));
       result.screenshot = await captureScreenshot(result);
       if (onTestComplete) onTestComplete(result);
     }
-
     return data.results;
   },
 
-  // ── Retest a single failed test ────────────────────────────
   async retestSingle(test) {
     const data = await apiFetch('retest', { method: 'POST', body: { test } });
     data.result.screenshot = await captureScreenshot(data.result);
@@ -110,7 +117,6 @@ export const testEngineService = {
   },
 };
 
-// ── Client-side screenshot placeholder (canvas) ───────────────
 async function captureScreenshot(test) {
   return new Promise(resolve => {
     setTimeout(() => {
@@ -122,25 +128,23 @@ async function captureScreenshot(test) {
       g.addColorStop(1, '#0f172a');
       ctx.fillStyle = g; ctx.fillRect(0, 0, 400, 300);
       ctx.fillStyle = '#94a3b8'; ctx.font = '11px monospace';
-      ctx.fillText(`[${(test.type || 'TEST').toUpperCase()}] ${test.id || ''}`, 16, 28);
+      ctx.fillText(`[${(test.type||'TEST').toUpperCase()}] ${test.id||''}`, 16, 28);
       ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 13px sans-serif';
-      ctx.fillText((test.name || '').substring(0, 44), 16, 54);
+      ctx.fillText((test.name||'').substring(0, 44), 16, 54);
       ctx.fillStyle = test.status === 'passed' ? '#4ade80' : '#f87171';
       ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(test.status?.toUpperCase() || '', 16, 78);
+      ctx.fillText(test.status?.toUpperCase()||'', 16, 78);
       ctx.fillStyle = '#64748b'; ctx.font = '10px monospace';
       ctx.fillText(new Date().toLocaleString(), 16, 100);
-      // Browser chrome mock
       ctx.strokeStyle = '#334155'; ctx.lineWidth = 1;
       ctx.strokeRect(16, 115, 368, 165);
       ctx.fillStyle = '#1e293b'; ctx.fillRect(17, 116, 367, 22);
       ctx.fillStyle = '#475569'; ctx.font = '9px monospace';
-      ctx.fillText('● ● ●   https://' + (test.url || 'example.com'), 26, 130);
+      ctx.fillText('● ● ●   https://' + (test.url||'example.com'), 26, 130);
       ctx.fillStyle = '#0f172a'; ctx.fillRect(17, 139, 367, 140);
-      [['#1e3a5f', 28, 149, 160, 55], ['#1e3a5f', 200, 149, 160, 55], ['#1e293b', 28, 215, 340, 50]].forEach(
-        ([c, x, y, w, h]) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
-      );
+      [['#1e3a5f',28,149,160,55],['#1e3a5f',200,149,160,55],['#1e293b',28,215,340,50]]
+        .forEach(([c,x,y,w,h]) => { ctx.fillStyle=c; ctx.fillRect(x,y,w,h); });
       resolve(canvas.toDataURL('image/png'));
-    }, 80);
+    }, 60);
   });
 }

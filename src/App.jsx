@@ -28,6 +28,7 @@ import { PLANS } from './config/services';
 // ── Modals ────────────────────────────────────────────────────
 import AuthModal    from './components/modals/AuthModal';
 import PaymentModal from './components/modals/PaymentModal';
+import ReportsPage  from './pages/ReportsPage';
 
 // ─────────────────────────────────────────────────────────────
 // ROOT APP
@@ -71,6 +72,9 @@ export default function App() {
   const [authCredentials, setAuthCredentials] = useState({ username: '', password: '' });
 
   const showAds = PLANS[userPlan]?.showAds ?? true;
+
+  // ── Page view ────────────────────────────────────────────
+  const [currentView, setCurrentView] = useState('main'); // 'main' | 'reports'
 
   // ── Helpers ───────────────────────────────────────────────
   const addTest = useCallback((type, testData) => {
@@ -145,31 +149,34 @@ export default function App() {
     setIsGenerating(true);
     setAnalysisProgress(0);
 
-    const maxTests = PLANS[userPlan]?.maxTestsPerAnalysis ?? 10;
-    let count = 0;
-
     try {
-      const { generated } = await testEngineService.analyzeAndGenerate(
+      const { generated, meta } = await testEngineService.analyzeAndGenerate(
         url,
         needsAuth ? authCredentials : null,
         (pct, msg) => { setAnalysisProgress(pct); setAnalysisMsg(msg); },
       );
 
+      // Load ALL generated tests — no limits
+      let count = 0;
       Object.entries(generated).forEach(([type, list]) => {
-        const limited = list.slice(0, Math.max(1, Math.floor(maxTests / 6)));
-        limited.forEach(t => addTest(type, t));
-        count += limited.length;
+        list.forEach(t => addTest(type, t));
+        count += list.length;
       });
 
       setModal(null);
       setIsGenerating(false);
 
-      if (userPlan === 'free') {
-        alert(`🆓 Free: generated ${count} tests (limited). Upgrade for 500+.`);
-        setModal('upgrade');
-      } else {
-        alert(`✅ Generated ${count} test cases!`);
-      }
+      const breakdown = meta?.breakdown
+        ? Object.entries(meta.breakdown).map(([k,v]) => `${k}: ${v}`).join(' · ')
+        : '';
+
+      alert(
+        `✅ Analysis complete!\n\n` +
+        `🌐 Pages crawled: ${meta?.pagesAnalyzed || 1}\n` +
+        `🧪 Test cases generated: ${count}\n\n` +
+        `${breakdown}\n\n` +
+        `Pages: ${(meta?.pagesTitles || []).slice(0,5).join(', ')}${(meta?.pagesTitles||[]).length > 5 ? '…' : ''}`
+      );
     } catch (e) {
       setIsGenerating(false);
       alert(`❌ ${e.message}`);
@@ -283,7 +290,18 @@ export default function App() {
       {/* Inject AdSense script once */}
       <AdSenseScript />
 
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4 md:p-6 font-sans">
+      {/* ── REPORTS PAGE (full screen) ── */}
+      {currentView === 'reports' && (
+        <ReportsPage
+          tests={tests}
+          results={results}
+          bugs={bugs}
+          onBack={() => setCurrentView('main')}
+        />
+      )}
+
+      {/* ── MAIN APP ── */}
+      {currentView === 'main' && (
         <div className="max-w-7xl mx-auto space-y-4">
 
           {/* ── TOP BANNER AD (free users only) ── */}
@@ -310,6 +328,7 @@ export default function App() {
             onJiraImport={() => { setJiraAction('import'); setModal('jira'); }}
             onJiraExport={() => { setJiraAction('export'); setModal('jira'); }}
             onExport={handleExport}
+            onReports={() => setCurrentView('reports')}
             onRun={() => guardedAction(handleRunTests)}
           />
 
@@ -450,6 +469,7 @@ export default function App() {
           </Modal>
         )}
       </div>
+      )} {/* end currentView === 'main' */}
     </>
   );
 }
@@ -476,7 +496,7 @@ function FreePlanBanner({ freeRunsLeft, onUpgrade }) {
     <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between gap-4">
       <div className="flex items-center gap-3 text-amber-300">
         <Crown size={20} />
-        <span className="text-sm font-medium">Free Plan — <strong>{freeRunsLeft}</strong> test runs remaining · Limited to 10 tests/analysis</span>
+        <span className="text-sm font-medium">Free Plan — <strong>{freeRunsLeft}</strong> test runs remaining this month · Unlimited test case generation</span>
       </div>
       <button onClick={onUpgrade} className="shrink-0 px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-bold rounded-lg">
         Upgrade
@@ -485,7 +505,7 @@ function FreePlanBanner({ freeRunsLeft, onUpgrade }) {
   );
 }
 
-function Header({ isAuthenticated, userProfile, userPlan, totalTests, isRunning, canRun, onLogin, onLogout, onUpgrade, onAnalyze, onImport, onJiraImport, onJiraExport, onExport, onRun }) {
+function Header({ isAuthenticated, userProfile, userPlan, totalTests, isRunning, canRun, onLogin, onLogout, onUpgrade, onAnalyze, onImport, onJiraImport, onJiraExport, onExport, onReports, onRun }) {
   const Btn = ({ onClick, disabled, color = 'slate', icon: Icon, label, small }) => {
     const colors = {
       slate:  'bg-slate-700 hover:bg-slate-600 text-slate-200',
@@ -543,6 +563,7 @@ function Header({ isAuthenticated, userProfile, userPlan, totalTests, isRunning,
           <Btn onClick={onJiraImport} icon={Download} label="Jira Import" color="blue" />
           <Btn onClick={onJiraExport} icon={Upload} label="Jira Export" color="indigo" disabled={totalTests === 0} />
           <Btn onClick={onExport} icon={FileSpreadsheet} label="Export CSV" color="green" disabled={totalTests === 0} />
+          <Btn onClick={onReports} icon={FileText} label="Reports" color="indigo" disabled={totalTests === 0} />
           <Btn
             onClick={onRun}
             icon={isRunning ? Loader : Play}
