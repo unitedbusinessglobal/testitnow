@@ -1,11 +1,10 @@
 {
   "name": "testitnow-frontend",
   "version": "1.0.0",
-  "description": "TestItNow — Professional Testing Framework UI (Netlify)",
+  "description": "TestItNow — Professional Testing Framework UI",
   "private": true,
   "engines": {
-    "node": "24.x",
-    "npm": "10.x"
+    "node": "20.x"
   },
   "dependencies": {
     "react": "^18.3.1",

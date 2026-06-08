@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "TestItNow API – Vercel Serverless + Neon PostgreSQL + Stripe",
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": { "node": "20.x" },
   "scripts": {
     "dev":        "vercel dev",
     "build":      "echo 'Serverless — no build step'",
