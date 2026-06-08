@@ -10,7 +10,7 @@
     "db:migrate": "node --env-file=.env scripts/migrate.js"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^0.9.3",
+    "@neondatabase/serverless": "^0.9.4",
     "bcryptjs":                 "^2.4.3",
     "jsonwebtoken":             "^9.0.2",
     "stripe":                   "^16.2.0"

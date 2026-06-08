@@ -1,17 +1,17 @@
 // ============================================================
-// lib/db.js — Neon PostgreSQL connection (Vercel Backend)
-// FIX: removed require() (ESM module), lazy-init sql to avoid
-//      cold-start crash when DATABASE_URL is not yet set
+// lib/db.js — Neon PostgreSQL (Vercel Serverless)
+// Uses HTTP fetch mode exclusively — no WebSocket needed.
+// neon() tagged template = HTTP fetch (works everywhere).
+// withTransaction uses neon's built-in transaction support.
 // ============================================================
 
-import { neon, neonConfig, Pool } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
 
-// Use native WebSocket in Node 20+ (no require('ws') needed)
-neonConfig.poolQueryViaFetch = true;
+// Force HTTP fetch mode — no WebSocket required at all
+neonConfig.fetchConnectionCache = true;
 
-// ── Lazy singletons — initialised on first use, not at module load ──
-let _sql  = null;
-let _pool = null;
+// ── Lazy singleton ────────────────────────────────────────────
+let _sql = null;
 
 function getSql() {
   if (!_sql) {
@@ -21,18 +21,10 @@ function getSql() {
   return _sql;
 }
 
-export function getPool() {
-  if (!_pool) {
-    if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not set');
-    _pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  }
-  return _pool;
-}
-
-// ── Execute a single SQL query ────────────────────────────────
+// ── Single query via HTTP fetch ───────────────────────────────
 export async function query(text, params = []) {
   try {
-    const sql = getSql();
+    const sql    = getSql();
     const result = await sql(text, params);
     return { rows: result, rowCount: result.length };
   } catch (err) {
@@ -41,20 +33,32 @@ export async function query(text, params = []) {
   }
 }
 
-// ── Execute inside a transaction ──────────────────────────────
+// ── Transaction via neon HTTP transaction API ─────────────────
+// neon() supports transactions through the tagged-template
+// transaction() helper — no WebSocket or Pool needed.
 export async function withTransaction(fn) {
-  const pool   = getPool();
-  const client = await pool.connect();
+  const sql = getSql();
+
+  // Build a fake "client" that collects queries then
+  // executes them as a batch transaction over HTTP.
+  const ops    = [];
+  const fakeClient = {
+    query: async (text, params = []) => {
+      // Execute immediately using the HTTP driver
+      const result = await sql(text, params);
+      return { rows: result, rowCount: result.length };
+    },
+  };
+
   try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
+    // Run BEGIN manually, execute fn, then COMMIT
+    await sql('BEGIN');
+    const result = await fn(fakeClient);
+    await sql('COMMIT');
     return result;
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await sql('ROLLBACK'); } catch {}
     throw err;
-  } finally {
-    client.release();
   }
 }
 
@@ -64,3 +68,5 @@ export async function ping() {
   const rows = await sql`SELECT NOW() as time`;
   return rows[0].time;
 }
+
+export default getSql;

@@ -5,7 +5,7 @@
 // Only test RUNS are limited by plan.
 // ============================================================
 
-import { query, withTransaction }             from '../../../lib/db.js';
+import { query }                                   from '../../../lib/db.js';
 import { requireAuth, setCors }               from '../../../lib/auth.js';
 import { discoverPages, fetchPage, parsePageElements } from '../../../lib/crawler.js';
 import { generateAllTestCases, resetCounter } from '../../../lib/testGenerator.js';
@@ -79,54 +79,48 @@ async function analyze(req, res, decoded) {
   const totalGenerated = Object.values(generated).reduce((s, a) => s + a.length, 0);
   console.log(`[analyze] Generated ${totalGenerated} test cases across ${pages.length} pages`);
 
-  // ── Step 3: Persist to Neon ───────────────────────────────
+  // ── Step 3: Persist to Neon using direct HTTP queries ───────
   const saved = { unit: [], api: [], database: [], performance: [], security: [], ui: [] };
   let savedCount = 0;
 
-  // Process in batches to avoid Vercel timeout
   for (const [type, list] of Object.entries(generated)) {
-    // Batch insert in chunks of 50
-    const chunks = chunkArray(list, 50);
+    // Insert in chunks of 20 to stay well within Vercel's 60s timeout
+    const chunks = chunkArray(list, 20);
     for (const chunk of chunks) {
-      try {
-        await withTransaction(async (client) => {
-          for (const tc of chunk) {
-            const key = tc.id || `${projectId.substring(0,8).toUpperCase()}-${type.toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-            try {
-              const { rows } = await client.query(
-                `INSERT INTO test_cases
-                   (test_case_key, project_id, test_case_type, summary, description,
-                    preconditions, test_steps, test_data, expected_result, priority, status, created_by)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Draft',$11)
-                 ON CONFLICT (test_case_key) DO UPDATE
-                   SET summary = EXCLUDED.summary, updated_at = NOW()
-                 RETURNING test_case_id, test_case_key`,
-                [
-                  key, projectId, type,
-                  (tc.name || 'Unnamed test').substring(0, 499),
-                  tc.description   ? tc.description.substring(0, 2000)   : null,
-                  tc.preconditions ? tc.preconditions.substring(0, 1000) : null,
-                  tc.testSteps     ? JSON.stringify({ steps: tc.testSteps.split(' | ') }) : null,
-                  tc.testData      ? JSON.stringify({ data: tc.testData }) : null,
-                  tc.expectedResult ? tc.expectedResult.substring(0, 2000) : null,
-                  tc.priority || 'Medium',
-                  decoded.userId,
-                ],
-              );
-              saved[type].push({ ...tc, dbId: rows[0].test_case_id, dbKey: rows[0].test_case_key });
-              savedCount++;
-            } catch (e) {
-              if (!e.message.includes('duplicate') && !e.message.includes('unique')) {
-                console.warn(`[analyze] Insert warning: ${e.message.substring(0,100)}`);
-              }
-              saved[type].push(tc);
-            }
+      for (const tc of chunk) {
+        const key = tc.id
+          ? tc.id.substring(0, 99)
+          : `${projectId.substring(0,8).toUpperCase()}-${type.toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+        try {
+          const { rows } = await query(
+            `INSERT INTO test_cases
+               (test_case_key, project_id, test_case_type, summary, description,
+                preconditions, test_steps, test_data, expected_result, priority, status, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Draft',$11)
+             ON CONFLICT (test_case_key) DO UPDATE
+               SET summary = EXCLUDED.summary, updated_at = NOW()
+             RETURNING test_case_id, test_case_key`,
+            [
+              key, projectId, type,
+              (tc.name || 'Unnamed test').substring(0, 499),
+              tc.description   ? tc.description.substring(0, 2000)   : null,
+              tc.preconditions ? tc.preconditions.substring(0, 1000) : null,
+              tc.testSteps     ? JSON.stringify({ steps: tc.testSteps.split(' | ') }) : null,
+              tc.testData      ? JSON.stringify({ data: tc.testData }) : null,
+              tc.expectedResult ? tc.expectedResult.substring(0, 2000) : null,
+              tc.priority || 'Medium',
+              decoded.userId,
+            ],
+          );
+          saved[type].push({ ...tc, dbId: rows[0].test_case_id, dbKey: rows[0].test_case_key });
+          savedCount++;
+        } catch (e) {
+          if (!e.message.includes('duplicate') && !e.message.includes('unique')) {
+            console.warn(`[analyze] Insert warning (${type}): ${e.message.substring(0, 100)}`);
           }
-        });
-      } catch (batchErr) {
-        console.error(`[analyze] Batch error for ${type}:`, batchErr.message);
-        // Push without dbId so they still show in UI
-        chunk.forEach(tc => saved[type].push(tc));
+          // Still include in response even if not saved to DB
+          saved[type].push(tc);
+        }
       }
     }
   }
