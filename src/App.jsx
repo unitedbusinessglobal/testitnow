@@ -25,6 +25,9 @@ import { GoogleAdUnit, AdSenseScript } from './components/ads/GoogleAdUnit';
 // ── Config ────────────────────────────────────────────────────
 import { PLANS } from './config/services';
 
+// ── Modals ────────────────────────────────────────────────────
+import AuthModal from './components/modals/AuthModal';
+
 // ─────────────────────────────────────────────────────────────
 // ROOT APP
 // ─────────────────────────────────────────────────────────────
@@ -761,43 +764,8 @@ function BugsDashboard({ bugs }) {
 
 // ── Modal Contents ────────────────────────────────────────────
 
-function AuthModal({ mode, onLogin, onSignup, onToggle }) {
-  const [email, setEmail]     = useState('');
-  const [password, setPassword] = useState('');
-  const [phone, setPhone]     = useState('');
-
-  const handle = () => mode === 'login' ? onLogin(email, password) : onSignup(email, password, phone);
-  const Field = ({ label, type, value, onChange, placeholder }) => (
-    <div>
-      <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500" />
-    </div>
-  );
-
-  return (
-    <div className="space-y-4">
-      <div className="text-center">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-blue-600/20 border border-blue-500/30 rounded-full mb-3">
-          <User className="text-blue-400" size={28} />
-        </div>
-        <h2 className="text-xl font-bold text-white">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-      </div>
-      <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="you@example.com" />
-      <Field label="Password" type="password" value={password} onChange={setPassword} placeholder="········" />
-      {mode === 'signup' && <Field label="Phone (optional — for promos)" type="tel" value={phone} onChange={setPhone} placeholder="+1 234 567 8900" />}
-      <button onClick={handle} className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold text-sm">
-        {mode === 'login' ? 'Login' : 'Sign Up Free'}
-      </button>
-      <p className="text-center text-xs text-slate-400">
-        {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-        <button onClick={onToggle} className="text-blue-400 hover:text-blue-300 font-medium">
-          {mode === 'login' ? 'Sign Up' : 'Login'}
-        </button>
-      </p>
-    </div>
-  );
-}
+// AuthModal is imported from ./components/modals/AuthModal
+// (moved to fix cursor-jump bug caused by Field defined inside component)
 
 function UpgradeModal({ currentPlan, onSelect }) {
   return (
