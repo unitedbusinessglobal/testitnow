@@ -26,8 +26,7 @@ import { GoogleAdUnit, AdSenseScript } from './components/ads/GoogleAdUnit';
 import { PLANS } from './config/services';
 
 // ── Modals ────────────────────────────────────────────────────
-import AuthModal    from './components/modals/AuthModal';
-import PaymentModal from './components/modals/PaymentModal';
+import AuthModal from './components/modals/AuthModal';
 
 // ─────────────────────────────────────────────────────────────
 // ROOT APP
@@ -128,16 +127,15 @@ export default function App() {
     setFreeRunsLeft(PLANS.free.testRunsPerMonth);
   };
 
-  const handleUpgradePlan = (planId) => {
-    // Open PaymentModal instead of directly upgrading
-    setModal('payment');
-  };
-
-  const handlePaymentSuccess = async (planId, data) => {
-    setUserPlan(planId);
-    setFreeRunsLeft(data.testsRemaining || PLANS[planId]?.testRunsPerMonth || 100);
-    setUserProfile(p => ({ ...p, plan: planId }));
-    setModal(null);
+  const handleUpgradePlan = async (planId) => {
+    try {
+      const { plan, testsRemaining } = await authService.upgradePlan(null, planId, {});
+      setUserPlan(plan);
+      setFreeRunsLeft(testsRemaining);
+      setUserProfile(p => ({ ...p, plan }));
+      setModal(null);
+      alert(`🎉 Upgraded to ${PLANS[plan].name}!`);
+    } catch (e) { alert(`❌ ${e.message}`); }
   };
 
   // ── TEST GENERATION ────────────────────────────────────────
@@ -375,17 +373,7 @@ export default function App() {
 
         {modal === 'upgrade' && (
           <Modal onClose={() => setModal(null)} wide>
-            <UpgradeModal currentPlan={userPlan} onSelect={() => setModal('payment')} />
-          </Modal>
-        )}
-
-        {modal === 'payment' && (
-          <Modal onClose={() => setModal(null)}>
-            <PaymentModal
-              currentPlan={userPlan}
-              onSuccess={handlePaymentSuccess}
-              onClose={() => setModal(null)}
-            />
+            <UpgradeModal currentPlan={userPlan} onSelect={handleUpgradePlan} />
           </Modal>
         )}
 
