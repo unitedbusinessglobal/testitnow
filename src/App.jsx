@@ -378,9 +378,9 @@ export default function App() {
           {/* ── BUGS DASHBOARD ── */}
           {bugs.length > 0 && <BugsDashboard bugs={bugs} />}
 
-        </div>{/* end max-w-7xl */}
-        </div>{/* end min-h-screen */}
-      )}{/* end currentView === 'main' */}
+        </div>
+        </div>
+      )}
 
       {/* ══ MODALS — rendered outside page divs so z-index works ══ */}
 
