@@ -1,0 +1,22 @@
+{
+  "name": "testitnow-backend",
+  "version": "1.0.0",
+  "description": "TestItNow API – Vercel Serverless + Neon PostgreSQL + Stripe",
+  "type": "module",
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "dev":        "vercel dev",
+    "build":      "echo 'Serverless — no build step'",
+    "db:migrate": "node --env-file=.env scripts/migrate.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.9.3",
+    "bcryptjs":                 "^2.4.3",
+    "jsonwebtoken":             "^9.0.2",
+    "stripe":                   "^16.2.0"
+  },
+  "devDependencies": {
+    "dotenv":  "^16.4.5",
+    "vercel":  "^34.0.0"
+  }
+}
