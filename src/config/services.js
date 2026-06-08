@@ -1,7 +1,5 @@
 // ============================================================
 // src/config/services.js
-// All services now live on ONE Vercel deployment.
-// For independent scaling, set each URL to a separate Vercel project.
 // ============================================================
 
 const VERCEL_API = process.env.REACT_APP_API_URL || 'http://localhost:3000';
@@ -15,15 +13,16 @@ export const SERVICES = {
 };
 
 export const ADSENSE_CONFIG = {
-  publisherId: process.env.REACT_APP_ADSENSE_PUBLISHER_ID || 'ca-pub-XXXXXXXXXXXXXXXXX',
+  publisherId: 'ca-pub-7683488535147970',
   slots: {
-    headerBanner:  process.env.REACT_APP_AD_SLOT_HEADER      || '1234567890',
-    sidebarTop:    process.env.REACT_APP_AD_SLOT_SIDEBAR_TOP  || '0987654321',
-    sidebarBottom: process.env.REACT_APP_AD_SLOT_SIDEBAR_BOT  || '1122334455',
-    inFeed:        process.env.REACT_APP_AD_SLOT_INFEED        || '5566778899',
-    resultsPanel:  process.env.REACT_APP_AD_SLOT_RESULTS       || '9988776655',
-    upgradeBanner: process.env.REACT_APP_AD_SLOT_UPGRADE       || '4433221100',
+    headerBanner:  process.env.REACT_APP_AD_SLOT_HEADER      || '',
+    sidebarTop:    process.env.REACT_APP_AD_SLOT_SIDEBAR_TOP  || '',
+    sidebarBottom: process.env.REACT_APP_AD_SLOT_SIDEBAR_BOT  || '',
+    inFeed:        process.env.REACT_APP_AD_SLOT_INFEED        || '',
+    resultsPanel:  process.env.REACT_APP_AD_SLOT_RESULTS       || '',
+    upgradeBanner: process.env.REACT_APP_AD_SLOT_UPGRADE       || '',
   },
+  // true in production so real ads load; false in dev shows yellow placeholders
   enabled: process.env.NODE_ENV === 'production',
 };
 
