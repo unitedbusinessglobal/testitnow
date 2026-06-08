@@ -4,7 +4,7 @@
 // ============================================================
 
 import { useEffect, useRef } from 'react';
-import { ADSENSE_CONFIG } from '../config/services';
+import { ADSENSE_CONFIG } from '../../config/services';
 
 /**
  * GoogleAdUnit — renders a single AdSense ad slot.
