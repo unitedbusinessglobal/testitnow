@@ -4,7 +4,7 @@
 // Update src/config/services.js per environment.
 // ============================================================
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Play, Trash2, Download, CheckCircle, XCircle, AlertTriangle,
   Terminal, Database, Globe, Lock, Monitor, Code, TrendingUp,
@@ -118,6 +118,7 @@ export default function App() {
       setUserPlan(user.plan);
       setFreeRunsLeft(user.testsRemaining);
       setModal(null);
+      setCurrentView('main');
     } catch (e) { alert(`❌ ${e.message}`); }
   };
 
@@ -129,6 +130,7 @@ export default function App() {
       setUserPlan('free');
       setFreeRunsLeft(PLANS.free.testRunsPerMonth);
       setModal(null);
+      setCurrentView('main');
     } catch (e) { alert(`❌ ${e.message}`); }
   };
 
