@@ -1,836 +1,1411 @@
 // ============================================================
 // lib/testGenerator.js
-// Takes crawled page data and generates comprehensive test cases
-// for every single element found on every page.
-// Produces 200+ test cases per page with multiple test scenarios.
+// Generates 100-300+ test cases per page.
+// Works even on SPAs where HTML parsing yields few elements —
+// infers elements from URL/page title and generates tests for
+// every possible scenario, interaction, and edge case.
 // ============================================================
 
 let tcCounter = 0;
+export function resetCounter() { tcCounter = 0; }
 function nextId(prefix) {
   tcCounter++;
-  return `${prefix}-${String(tcCounter).padStart(4, '0')}`;
+  return `${prefix}-${String(tcCounter).padStart(4,'0')}`;
 }
 
-export function resetCounter() { tcCounter = 0; }
-
-// ── Master generator — takes all pages, returns all tests ─────
+// ── MASTER GENERATOR ─────────────────────────────────────────
 export function generateAllTestCases(pages, authCredentials) {
   resetCounter();
-  const all = { ui: [], api: [], security: [], performance: [], database: [], unit: [] };
-  const hasAuth = authCredentials?.username && authCredentials?.password;
+  const all = { ui:[], api:[], security:[], performance:[], database:[], unit:[] };
 
-  pages.forEach((page, pageIdx) => {
-    const pageTests = generatePageTestCases(page, pageIdx, hasAuth, authCredentials);
-    Object.entries(pageTests).forEach(([type, tests]) => {
-      all[type].push(...tests);
-    });
+  pages.forEach((page, idx) => {
+    const t = generatePageTests(page, idx, authCredentials);
+    Object.entries(t).forEach(([type, list]) => all[type].push(...list));
   });
 
-  // Cross-page tests
-  all.ui.push(   ...generateCrossPageTests(pages));
-  all.security.push(...generateGlobalSecurityTests(pages));
+  all.ui.push(         ...generateCrossPageTests(pages));
+  all.security.push(   ...generateGlobalSecurityTests(pages));
   all.performance.push(...generateGlobalPerfTests(pages));
-  all.api.push(  ...generateApiTests(pages));
-  all.database.push(...generateDatabaseTests());
-  all.unit.push( ...generateUnitTests());
+  all.api.push(        ...generateApiTests(pages));
+  all.database.push(   ...generateDatabaseTests());
+  all.unit.push(       ...generateUnitTests());
 
   return all;
 }
 
-// ── Per-page test generation ──────────────────────────────────
-function generatePageTestCases(page, pageIdx, hasAuth, authCredentials) {
+// ── PER-PAGE GENERATOR ────────────────────────────────────────
+function generatePageTests(page, pageIdx, authCredentials) {
   const { elements, title, url } = page;
-  const tests = { ui: [], api: [], security: [] };
-  const p = (n) => `TC-P${pageIdx+1}-${n}`;
+  const tests   = { ui:[], security:[] };
+  const hasAuth = authCredentials?.username && authCredentials?.password;
 
-  // ── 1. PAGE-LEVEL TESTS ───────────────────────────────────
+  // Infer page type from URL + title to supplement parsed elements
+  const pageType = inferPageType(url, title);
+  const inferred = inferElements(url, title, pageType, elements);
 
-  // Page load
-  tests.ui.push({
-    id: nextId('UI-LOAD'), name: `[${title}] Page loads successfully`,
-    url, description: `Verify ${title} (${url}) loads without errors`,
-    preconditions: 'Browser open | Internet connection available',
-    testSteps: `1. Open browser | 2. Navigate to ${url} | 3. Wait for full load | 4. Check browser console for errors | 5. Verify page title | 6. Check HTTP status`,
-    expectedResult: `HTTP 200 | Page loads < 3s | Title contains "${title}" | No console errors | No broken resources`,
-    priority: pageIdx === 0 ? 'Critical' : 'High',
+  // Merge parsed + inferred elements
+  const merged = mergeElements(elements, inferred);
+
+  // ─────────────────────────────────────────────────────────
+  // A. UNIVERSAL PAGE TESTS (every page gets all of these)
+  // ─────────────────────────────────────────────────────────
+
+  // 1. Load tests
+  tests.ui.push(tc('UI-LOAD', `[${title}] Page Load — Success`, url,
+    `Verify ${url} loads and renders correctly`,
+    `Browser open | App accessible`,
+    `1. Navigate to ${url} | 2. Wait for JS to render | 3. Verify content visible | 4. Check network tab for errors | 5. Verify status 200`,
+    `Page visible within 3s | Status 200 | No JS errors | No 404 resources`,
+    pageIdx < 3 ? 'Critical' : 'High'));
+
+  tests.ui.push(tc('UI-LOAD', `[${title}] Page Load — After Hard Refresh`, url,
+    `Verify page loads correctly after Ctrl+Shift+R (bypass cache)`,
+    `Page previously visited`,
+    `1. Navigate to ${url} | 2. Press Ctrl+Shift+R | 3. Verify full reload | 4. Verify content same as normal load`,
+    `Full reload works | No cached state issues | Content consistent`,
+    'Medium'));
+
+  tests.ui.push(tc('UI-LOAD', `[${title}] Direct URL Access`, url,
+    `Verify page accessible by typing URL directly (SPA routing)`,
+    `Browser address bar`,
+    `1. Clear browser history | 2. Type ${url} directly | 3. Press Enter | 4. Verify page loads without 404 | 5. Verify correct content shown`,
+    `Page loads correctly | No "Cannot GET /" error | SPA routing works | Content matches page`,
+    'Critical'));
+
+  tests.ui.push(tc('UI-LOAD', `[${title}] Page Load — Slow Network (3G)`, url,
+    `Verify page remains usable on slow 3G connection`,
+    `Chrome DevTools > Network throttling`,
+    `1. Open DevTools > Network | 2. Set throttle to "Slow 3G" | 3. Navigate to ${url} | 4. Verify loading state shown | 5. Verify page eventually loads`,
+    `Loading indicator shown | Content loads within 10s | No timeout errors | Skeleton/placeholder shown`,
+    'High'));
+
+  tests.ui.push(tc('UI-LOAD', `[${title}] Offline Behaviour`, url,
+    `Verify graceful handling when offline`,
+    `DevTools Network > Offline mode`,
+    `1. Load page | 2. Enable Offline mode in DevTools | 3. Click navigation links | 4. Verify error message | 5. Re-enable network | 6. Verify page recovers`,
+    `Friendly offline message | App doesn't crash | Recovers when network restored`,
+    'Medium'));
+
+  // 2. Responsive tests — 5 breakpoints
+  [
+    {w:320,  label:'Mobile S (320px)',   device:'iPhone SE'},
+    {w:375,  label:'Mobile M (375px)',   device:'iPhone 14'},
+    {w:768,  label:'Tablet (768px)',     device:'iPad'},
+    {w:1024, label:'Laptop (1024px)',    device:'MacBook'},
+    {w:1440, label:'Desktop (1440px)',   device:'External Monitor'},
+  ].forEach(bp => {
+    tests.ui.push(tc('UI-RESP', `[${title}] Responsive — ${bp.label}`, url,
+      `Verify layout at ${bp.label} (${bp.device})`,
+      `Chrome DevTools | Device toolbar`,
+      `1. Open ${url} | 2. DevTools > Device toolbar | 3. Set width ${bp.w}px | 4. Check layout | 5. Check overflow | 6. Check font sizes | 7. Check touch targets | 8. Test all interactions`,
+      `No horizontal scroll | Readable text (≥14px) | Touch targets ≥44px | No overlapping elements | Images fit viewport`,
+      'High'));
   });
 
-  // Responsive tests — 4 breakpoints
-  [{w:375,label:'Mobile (375px)'},{w:768,label:'Tablet (768px)'},{w:1024,label:'Laptop (1024px)'},{w:1440,label:'Desktop (1440px)'}]
-    .forEach(bp => {
-      tests.ui.push({
-        id: nextId('UI-RESP'), name: `[${title}] Responsive — ${bp.label}`,
-        url, description: `Verify layout at ${bp.label} viewport`,
-        preconditions: 'Chrome DevTools available',
-        testSteps: `1. Open ${url} | 2. Open DevTools (F12) | 3. Set viewport to ${bp.w}px | 4. Check layout | 5. Check text overflow | 6. Check navigation | 7. Verify no horizontal scroll`,
-        expectedResult: `No horizontal scroll | Content readable | Navigation accessible | Images scale | Text not truncated | Touch targets ≥ 44px`,
-        priority: 'High',
-      });
-    });
-
-  // Browser compatibility
-  ['Chrome', 'Firefox', 'Safari', 'Edge'].forEach(browser => {
-    tests.ui.push({
-      id: nextId('UI-BROWSER'), name: `[${title}] Browser — ${browser}`,
-      url, description: `Verify page renders correctly in ${browser}`,
-      preconditions: `${browser} browser installed`,
-      testSteps: `1. Open ${url} in ${browser} | 2. Verify layout | 3. Check all interactive elements | 4. Test all forms | 5. Verify no CSS issues`,
-      expectedResult: `Consistent layout | All elements visible | Forms work | No browser-specific errors`,
-      priority: 'Medium',
-    });
+  // 3. Browser tests — 5 browsers
+  ['Chrome 120', 'Firefox 121', 'Safari 17', 'Edge 120', 'Chrome Mobile'].forEach(browser => {
+    tests.ui.push(tc('UI-BROWSER', `[${title}] ${browser} Compatibility`, url,
+      `Verify ${title} renders and functions correctly in ${browser}`,
+      `${browser} installed`,
+      `1. Open ${url} in ${browser} | 2. Check visual rendering | 3. Test interactive elements | 4. Check console for errors | 5. Verify fonts and icons load`,
+      `No layout breaks | All features work | No console errors | Fonts render correctly`,
+      'Medium'));
   });
 
-  // Accessibility
-  tests.ui.push({
-    id: nextId('UI-A11Y'), name: `[${title}] Accessibility (WCAG 2.1)`,
-    url, description: 'Verify page meets WCAG 2.1 AA accessibility standards',
-    preconditions: 'axe DevTools or WAVE extension installed',
-    testSteps: `1. Open ${url} | 2. Run axe accessibility scan | 3. Check keyboard navigation (Tab key) | 4. Test with screen reader | 5. Verify colour contrast | 6. Check focus indicators`,
-    expectedResult: `0 critical axe errors | Full keyboard navigation | Screen reader readable | Contrast ratio ≥ 4.5:1 | Visible focus indicators`,
-    priority: 'High',
+  // 4. Accessibility tests
+  [
+    ['WCAG 2.1 AA Scan',        `Run automated scan with axe | Verify 0 critical errors | 0 serious errors`],
+    ['Keyboard Navigation',     `Tab through all elements | Verify focus visible | Tab order logical | All interactive elements reachable`],
+    ['Screen Reader',           `Enable NVDA/VoiceOver | Navigate page | Verify all content announced | Images have alt text`],
+    ['Colour Contrast',         `Check all text | Verify contrast ratio ≥4.5:1 normal text | ≥3:1 large text | Use axe or Colour Contrast Analyser`],
+    ['Focus Management',        `Click links | Open modals | Verify focus moves correctly | Verify focus returns after close`],
+    ['Skip Navigation Link',    `Press Tab on page load | Verify "Skip to main content" appears | Press Enter | Verify focus jumps to main`],
+    ['ARIA Labels',             `Inspect interactive elements | Verify aria-label on icon buttons | Verify aria-expanded on toggles | Verify roles`],
+    ['Zoom to 200%',            `Browser zoom to 200% | Verify no content lost | Verify no horizontal scroll | Verify readable`],
+  ].forEach(([name, steps]) => {
+    tests.ui.push(tc('UI-A11Y', `[${title}] Accessibility — ${name}`, url,
+      `WCAG 2.1 compliance: ${name}`,
+      `Accessibility testing tools available`,
+      steps,
+      `Passes ${name} check | No accessibility violations`,
+      'High'));
   });
 
-  // SEO basics
-  tests.ui.push({
-    id: nextId('UI-SEO'), name: `[${title}] SEO — Meta Tags`,
-    url, description: 'Verify SEO meta tags and page structure',
-    preconditions: 'Browser DevTools available',
-    testSteps: `1. Open ${url} | 2. View page source | 3. Check <title> tag | 4. Check meta description | 5. Check meta viewport | 6. Check canonical URL | 7. Check H1 tag (${elements.headings.filter(h=>h.level===1).length} found)`,
-    expectedResult: `<title> present and meaningful | Meta description 50–160 chars | Viewport meta set | Canonical URL present | Exactly 1 H1 tag`,
-    priority: 'Medium',
+  // 5. SEO tests
+  [
+    ['Title Tag',           `View source | Check <title> exists | Title 30-60 chars | Contains keywords`],
+    ['Meta Description',    `View source | Check meta description | Length 50-160 chars | Unique and descriptive`],
+    ['Open Graph Tags',     `View source | Check og:title, og:description, og:image | All present`],
+    ['Canonical URL',       `View source | Check <link rel="canonical"> | Points to correct URL`],
+    ['H1 Structure',        `View source | Count H1 tags | Verify exactly 1 H1 | H1 is descriptive`],
+    ['Structured Data',     `View source | Check JSON-LD or microdata | Valid schema markup`],
+    ['robots.txt',          `Navigate to ${new URL(url).origin}/robots.txt | Verify exists | Not blocking important pages`],
+    ['sitemap.xml',         `Navigate to ${new URL(url).origin}/sitemap.xml | Verify exists | Contains all pages`],
+  ].forEach(([name, steps]) => {
+    tests.ui.push(tc('UI-SEO', `[${title}] SEO — ${name}`, url,
+      `SEO check: ${name}`,
+      `Browser and DevTools`,
+      steps,
+      `${name} passes SEO best practices`,
+      'Medium'));
   });
 
-  // Page performance
-  tests.ui.push({
-    id: nextId('UI-PERF'), name: `[${title}] Core Web Vitals`,
-    url, description: 'Measure and verify Core Web Vitals scores',
-    preconditions: 'Chrome with Lighthouse',
-    testSteps: `1. Open Chrome DevTools | 2. Go to Lighthouse tab | 3. Run audit on ${url} | 4. Record LCP, FID, CLS | 5. Check Performance score`,
-    expectedResult: `LCP < 2.5s | FID < 100ms | CLS < 0.1 | Performance score ≥ 80 | No render-blocking resources`,
-    priority: 'High',
+  // 6. Performance tests
+  [
+    ['Lighthouse Score',       `Run Lighthouse audit | Record Performance score | Target ≥80`],
+    ['LCP (Largest Contentful Paint)', `Measure LCP in Lighthouse | Target < 2.5s`],
+    ['FID (First Input Delay)',       `Measure FID | Target < 100ms`],
+    ['CLS (Cumulative Layout Shift)', `Measure CLS | Target < 0.1 | No layout shifts`],
+    ['TTFB (Time to First Byte)',     `Check TTFB in Network tab | Target < 600ms`],
+    ['Bundle Size',                   `Check Network tab | Main JS bundle < 500KB | CSS < 100KB`],
+    ['Image Optimisation',            `Check images in Network | WebP/AVIF format | Lazy loading | Correct dimensions`],
+    ['Caching Headers',               `Check response headers | Cache-Control set | ETag present | Immutable for static`],
+  ].forEach(([name, steps]) => {
+    tests.ui.push(tc('UI-PERF-PAGE', `[${title}] Performance — ${name}`, url,
+      `Performance metric: ${name}`,
+      `Chrome Lighthouse / DevTools`,
+      steps,
+      `${name} meets target threshold`,
+      'High'));
   });
 
-  // ── 2. NAVIGATION TESTS ───────────────────────────────────
-  if (elements.navItems.length > 0) {
-    const uniqueNavLinks = [...new Map(elements.navItems.map(n => [n.href, n])).values()].slice(0, 20);
-
-    // Test all nav items
-    tests.ui.push({
-      id: nextId('UI-NAV'), name: `[${title}] Navigation — All ${uniqueNavLinks.length} nav links`,
-      url, description: `Verify all ${uniqueNavLinks.length} navigation links work and lead to correct pages`,
-      preconditions: 'On the page with navigation visible',
-      testSteps: uniqueNavLinks.map((n, i) =>
-        `${i+1}. Click "${n.text}" (href: ${n.href}) → verify correct page loads`
-      ).join(' | '),
-      expectedResult: `All ${uniqueNavLinks.length} links functional | No 404 errors | Correct pages load | Active state highlighted`,
-      priority: 'Critical',
-    });
-
-    // Mobile hamburger menu
-    tests.ui.push({
-      id: nextId('UI-NAV-MOB'), name: `[${title}] Mobile Navigation Menu`,
-      url, description: 'Test mobile hamburger menu opens/closes correctly',
-      preconditions: 'Viewport set to 375px',
-      testSteps: `1. Set viewport to 375px | 2. Check hamburger icon visible | 3. Click hamburger | 4. Verify menu opens | 5. Click a nav link | 6. Verify menu closes | 7. Press Escape | 8. Verify menu closes`,
-      expectedResult: `Hamburger visible on mobile | Menu opens/closes | Links work | Escape key closes menu | Focus trap in open menu`,
-      priority: 'High',
-    });
-
-    // Individual nav link tests
-    uniqueNavLinks.slice(0, 15).forEach(link => {
-      tests.ui.push({
-        id: nextId('UI-NAVLINK'), name: `[${title}] Nav: "${link.text}"`,
-        url, description: `Verify nav link "${link.text}" navigates to ${link.href}`,
-        preconditions: 'Navigation is visible',
-        testSteps: `1. Locate nav link "${link.text}" | 2. Verify it is visible | 3. Click the link | 4. Verify URL changes to ${link.href} | 5. Verify page content matches link label`,
-        expectedResult: `Link "${link.text}" visible | Clickable | Navigates to ${link.href} | No 404 | Active state shown`,
-        priority: 'High',
-      });
-    });
-  }
-
-  // ── 3. FORM TESTS ─────────────────────────────────────────
-  elements.forms.forEach((form, fi) => {
-    const formLabel = form.id || `Form ${fi + 1}`;
-
-    // Form renders
-    tests.ui.push({
-      id: nextId('UI-FORM'), name: `[${title}] ${formLabel} — Renders correctly`,
-      url, description: `Verify ${formLabel} loads with all ${form.fields.length} fields visible`,
-      preconditions: `On ${url} | Form is visible`,
-      testSteps: `1. Navigate to ${url} | 2. Locate ${formLabel} | 3. Verify all ${form.fields.length} form fields visible | 4. Check submit button present | 5. Check for CSRF token | 6. Verify all labels present`,
-      expectedResult: `${form.fields.length} fields visible | Submit button present | CSRF token in hidden field | All fields have labels | Tab order logical`,
-      priority: 'Critical',
-    });
-
-    // Per-field tests
-    form.fields.forEach((field, fIdx) => {
-      // Required validation
-      if (field.required) {
-        tests.ui.push({
-          id: nextId('UI-FIELD'), name: `[${title}] ${formLabel} → "${field.name}" Required`,
-          url, description: `Verify "${field.name}" field shows error when empty`,
-          preconditions: `${formLabel} is loaded`,
-          testSteps: `1. Leave "${field.name}" (${field.type}) empty | 2. Fill all other required fields | 3. Submit form | 4. Verify error on "${field.name}" field | 5. Verify error message is helpful`,
-          testData: `Field: ${field.name} | Type: ${field.type} | Value: (empty)`,
-          expectedResult: `Validation error shown | Error message helpful (e.g. "This field is required") | Focus moves to ${field.name} | Form not submitted`,
-          priority: 'Critical',
-        });
-      }
-
-      // Valid input
-      const sampleValid = getSampleValidValue(field.type, field.name);
-      tests.ui.push({
-        id: nextId('UI-FIELD'), name: `[${title}] ${formLabel} → "${field.name}" Valid Input`,
-        url, description: `Verify "${field.name}" accepts valid ${field.type} input`,
-        preconditions: `${formLabel} is loaded`,
-        testSteps: `1. Click "${field.name}" field | 2. Enter valid value: "${sampleValid}" | 3. Click elsewhere | 4. Verify no validation error | 5. Verify field styling is normal`,
-        testData: `Field: ${field.name} | Type: ${field.type} | Valid value: ${sampleValid}`,
-        expectedResult: `"${field.name}" accepts "${sampleValid}" | No validation error | Field shows normal/success state`,
-        priority: field.required ? 'Critical' : 'High',
-      });
-
-      // Invalid input (type-specific)
-      const sampleInvalid = getSampleInvalidValue(field.type);
-      if (sampleInvalid) {
-        tests.ui.push({
-          id: nextId('UI-FIELD'), name: `[${title}] ${formLabel} → "${field.name}" Invalid Input`,
-          url, description: `Verify "${field.name}" rejects invalid ${field.type} input`,
-          preconditions: `${formLabel} is loaded`,
-          testSteps: `1. Click "${field.name}" | 2. Enter invalid value: "${sampleInvalid}" | 3. Click elsewhere or submit | 4. Verify validation error | 5. Check error message is clear`,
-          testData: `Field: ${field.name} | Type: ${field.type} | Invalid value: ${sampleInvalid}`,
-          expectedResult: `Validation error shown | Error is specific | Field highlighted | Form not submitted`,
-          priority: 'High',
-        });
-      }
-
-      // Pattern validation
-      if (field.pattern) {
-        tests.ui.push({
-          id: nextId('UI-FIELD'), name: `[${title}] ${formLabel} → "${field.name}" Pattern`,
-          url, description: `Verify "${field.name}" enforces pattern: ${field.pattern}`,
-          preconditions: `${formLabel} is loaded`,
-          testSteps: `1. Enter value NOT matching pattern "${field.pattern}" | 2. Submit | 3. Verify error | 4. Enter value matching pattern | 5. Verify accepted`,
-          testData: `Pattern: ${field.pattern}`,
-          expectedResult: `Pattern mismatch shows error | Valid pattern value accepted`,
-          priority: 'High',
-        });
-      }
-
-      // Max length
-      if (field.maxLength) {
-        tests.ui.push({
-          id: nextId('UI-FIELD'), name: `[${title}] ${formLabel} → "${field.name}" MaxLength (${field.maxLength})`,
-          url, description: `Verify "${field.name}" does not exceed maxLength ${field.maxLength}`,
-          preconditions: `${formLabel} is loaded`,
-          testSteps: `1. Enter ${field.maxLength} characters | 2. Verify accepted | 3. Try to enter 1 more character | 4. Verify blocked or truncated`,
-          testData: `Max length: ${field.maxLength} | Test: ${'A'.repeat(parseInt(field.maxLength)+5)}`,
-          expectedResult: `Input capped at ${field.maxLength} chars | Cannot exceed limit | No JavaScript errors`,
-          priority: 'Medium',
-        });
-      }
-
-      // XSS per field
-      tests.security.push({
-        id: nextId('SEC-XSS'), name: `[${title}] XSS → "${field.name}" in ${formLabel}`,
-        url, description: `Test XSS injection in "${field.name}" field`,
-        preconditions: `${formLabel} is loaded`,
-        testSteps: `1. Enter <script>alert('xss-${field.name}')</script> | 2. Submit | 3. Check no alert fires | 4. Try <img src=x onerror=alert(1)> | 5. Verify sanitised`,
-        testData: `Payload 1: <script>alert('xss')</script>\nPayload 2: <img src=x onerror=alert(1)>\nPayload 3: javascript:alert(1)`,
-        expectedResult: `No JavaScript executes | Input sanitised or rejected | Status 400 or escaped output`,
-        priority: 'Critical',
-      });
-    });
-
-    // Form submit — valid
-    tests.ui.push({
-      id: nextId('UI-SUBMIT'), name: `[${title}] ${formLabel} — Valid Submission`,
-      url, description: `Submit ${formLabel} with all valid data`,
-      preconditions: `${formLabel} visible | All fields accessible`,
-      testSteps: form.fields.map((f, i) =>
-        `${i+1}. Fill "${f.name}" with ${getSampleValidValue(f.type, f.name)}`
-      ).concat([`${form.fields.length+1}. Click submit`, `${form.fields.length+2}. Verify success`]).join(' | '),
-      testData: form.fields.map(f => `${f.name}: ${getSampleValidValue(f.type, f.name)}`).join(' | '),
-      expectedResult: `Form submits | Success response | No validation errors | Redirect or success message shown`,
-      priority: 'Critical',
-    });
-
-    // Form submit — all empty
-    tests.ui.push({
-      id: nextId('UI-SUBMIT'), name: `[${title}] ${formLabel} — Empty Submission`,
-      url, description: `Submit ${formLabel} with all fields empty`,
-      preconditions: `${formLabel} visible | All fields empty`,
-      testSteps: `1. Ensure all fields are empty | 2. Click submit | 3. Count validation errors | 4. Verify each required field shows error`,
-      expectedResult: `${form.fields.filter(f=>f.required).length} validation errors shown | Each required field highlighted | Form not submitted | Page stays on form`,
-      priority: 'Critical',
-    });
-
-    // SQL injection in form
-    tests.security.push({
-      id: nextId('SEC-SQL'), name: `[${title}] SQL Injection — ${formLabel}`,
-      url, description: `Test SQL injection via ${formLabel} fields`,
-      preconditions: `${formLabel} is visible`,
-      testSteps: `1. Enter ' OR '1'='1 in text fields | 2. Submit | 3. Check response | 4. Try ' UNION SELECT * FROM users-- | 5. Try '; DROP TABLE users--`,
-      testData: `Payload 1: ' OR '1'='1\nPayload 2: ' UNION SELECT * FROM users--\nPayload 3: '; DROP TABLE users;\nPayload 4: 1' OR '1' = '1' --`,
-      expectedResult: `SQL errors not exposed | No data leaked | Input rejected or sanitised | HTTP 400 or same page`,
-      priority: 'Critical',
-    });
+  // 7. Security per-page tests
+  [
+    [`[${title}] XSS — URL Parameter`,         `Try ${url}?q=<script>alert(1)</script> | Verify no XSS | Input escaped in page`],
+    [`[${title}] Clickjacking`,                 `Add ${url} to iframe on test page | Verify X-Frame-Options blocks it`],
+    [`[${title}] Mixed Content`,                `Open ${url} | Check console for mixed content warnings | All resources HTTPS`],
+    [`[${title}] Information Disclosure`,       `View source of ${url} | No comments with credentials | No debug info | No stack traces`],
+    [`[${title}] CSP Header`,                   `Check Content-Security-Policy response header | Restrictive policy | No unsafe-inline`],
+  ].forEach(([name, steps]) => {
+    tests.security.push(tc('SEC-PAGE', name, url, `Security: ${name}`, `Access to ${url}`, steps, `Security check passes | No vulnerabilities`, 'Critical'));
   });
 
-  // ── 4. BUTTON TESTS ───────────────────────────────────────
-  const uniqueButtons = [...new Map(elements.buttons.map(b => [b.text, b])).values()].slice(0, 30);
-  uniqueButtons.forEach(btn => {
-    if (btn.type === 'submit') return; // covered by form tests
+  // ─────────────────────────────────────────────────────────
+  // B. PAGE-TYPE SPECIFIC TESTS
+  // ─────────────────────────────────────────────────────────
+  generatePageTypeTests(pageType, title, url, merged, tests, pageIdx, hasAuth, authCredentials);
 
-    tests.ui.push({
-      id: nextId('UI-BTN'), name: `[${title}] Button: "${btn.text}"`,
-      url, description: `Verify "${btn.text}" button works correctly`,
-      preconditions: `On ${url} | Button is visible`,
-      testSteps: `1. Locate "${btn.text}" button | 2. Verify it is ${btn.disabled ? 'disabled' : 'enabled'} | 3. ${btn.disabled ? 'Verify click has no effect' : 'Click the button'} | 4. Verify expected action occurs | 5. Test keyboard activation (Enter/Space)`,
-      expectedResult: `Button ${btn.disabled ? 'is disabled and non-interactive' : 'triggers expected action'} | Keyboard accessible | Loading state shown if async | No console errors`,
-      priority: btn.text.toLowerCase().includes('delete') || btn.text.toLowerCase().includes('remove') ? 'Critical' : 'High',
-    });
+  // ─────────────────────────────────────────────────────────
+  // C. ELEMENT-BASED TESTS (from parsed + inferred elements)
+  // ─────────────────────────────────────────────────────────
 
-    // Confirmation dialogs for destructive actions
-    if (/delete|remove|cancel|clear|reset/i.test(btn.text)) {
-      tests.ui.push({
-        id: nextId('UI-BTN'), name: `[${title}] Button: "${btn.text}" — Confirmation`,
-        url, description: `Verify "${btn.text}" shows confirmation before executing`,
-        preconditions: `On ${url}`,
-        testSteps: `1. Click "${btn.text}" | 2. Verify confirmation dialog appears | 3. Click Cancel | 4. Verify action NOT taken | 5. Click "${btn.text}" again | 6. Confirm | 7. Verify action completes`,
-        expectedResult: `Confirmation dialog shown | Cancel prevents action | Confirm executes action | Undo available if applicable`,
-        priority: 'Critical',
-      });
-    }
-  });
+  // Forms
+  merged.forms.forEach((form, fi) => generateFormTests(form, fi, title, url, tests));
 
-  // ── 5. SELECT / DROPDOWN TESTS ────────────────────────────
-  elements.selects.forEach(sel => {
-    tests.ui.push({
-      id: nextId('UI-SEL'), name: `[${title}] Dropdown: "${sel.name}"`,
-      url, description: `Verify "${sel.name}" select dropdown works with all ${sel.options.length} options`,
-      preconditions: `On ${url} | Select visible`,
-      testSteps: [
-        `1. Locate "${sel.name}" dropdown`,
-        `2. Click to open`,
-        `3. Verify ${sel.options.length} options visible: ${sel.options.slice(0,5).join(', ')}${sel.options.length>5?'...':''}`,
-        ...sel.options.slice(0, 8).map((opt, i) => `${i+4}. Select "${opt}" | Verify selected`),
-        `${Math.min(sel.options.length, 8)+4}. ${sel.required ? 'Try submitting without selecting | Verify error' : 'Verify default/placeholder option'}`,
-      ].join(' | '),
-      testData: `Options: ${sel.options.join(', ')}`,
-      expectedResult: `All ${sel.options.length} options selectable | ${sel.required ? 'Required validation works' : 'Optional field works'} | Selected value persists | Keyboard navigable`,
-      priority: sel.required ? 'Critical' : 'High',
-    });
+  // Inputs (standalone, not in forms)
+  const standaloneInputs = merged.inputs.filter(inp =>
+    !merged.forms.some(f => f.fields.some(ff => ff.name === inp.name))
+  ).slice(0, 20);
+  standaloneInputs.forEach(inp => generateInputTests(inp, title, url, tests));
 
-    if (sel.multiple) {
-      tests.ui.push({
-        id: nextId('UI-SEL'), name: `[${title}] Multi-select: "${sel.name}"`,
-        url, description: `Verify "${sel.name}" allows multiple selections`,
-        preconditions: `On ${url}`,
-        testSteps: `1. Open "${sel.name}" | 2. Select first option | 3. Hold Ctrl/Cmd | 4. Select second option | 5. Verify both selected | 6. Deselect one | 7. Verify only one remains`,
-        expectedResult: `Multiple options can be selected | Ctrl+click works | Deselection works | Selected values passed in form`,
-        priority: 'High',
-      });
-    }
-  });
+  // Buttons
+  const uniqueBtns = [...new Map(merged.buttons.map(b=>[b.text,b])).values()].slice(0,25);
+  uniqueBtns.forEach(btn => generateButtonTests(btn, title, url, tests));
 
-  // ── 6. CHECKBOX TESTS ─────────────────────────────────────
-  const uniqueCheckboxes = [...new Map(elements.checkboxes.map(c => [c.name, c])).values()].slice(0, 20);
-  uniqueCheckboxes.forEach(cb => {
-    tests.ui.push({
-      id: nextId('UI-CB'), name: `[${title}] Checkbox: "${cb.name}"`,
-      url, description: `Verify checkbox "${cb.name}" toggles correctly`,
-      preconditions: `On ${url} | Checkbox visible`,
-      testSteps: `1. Locate checkbox "${cb.name}" | 2. Verify initial state (unchecked) | 3. Click checkbox | 4. Verify checked | 5. Click again | 6. Verify unchecked | 7. Press Space key | 8. Verify toggled`,
-      expectedResult: `Checkbox toggles on click | Keyboard toggle works (Space) | Visual state reflects checked/unchecked | Value sent in form when checked`,
-      priority: cb.required ? 'Critical' : 'Medium',
-    });
-  });
+  // Selects
+  merged.selects.slice(0,15).forEach(sel => generateSelectTests(sel, title, url, tests));
 
-  // ── 7. RADIO BUTTON TESTS ─────────────────────────────────
-  const radioGroups = [...new Set(elements.radios.map(r => r.name))];
-  radioGroups.slice(0, 10).forEach(groupName => {
-    const groupRadios = elements.radios.filter(r => r.name === groupName);
-    tests.ui.push({
-      id: nextId('UI-RADIO'), name: `[${title}] Radio Group: "${groupName}"`,
-      url, description: `Verify radio group "${groupName}" allows only one selection`,
-      preconditions: `On ${url} | Radio group visible`,
-      testSteps: groupRadios.slice(0, 6).map((r, i) =>
-        `${i+1}. Select "${r.value || `option ${i+1}`}" | Verify selected | Verify others deselected`
-      ).join(' | '),
-      expectedResult: `Only one option selected at a time | Previous deselects when new selected | Keyboard navigation works (arrow keys) | Value correctly sent in form`,
-      priority: 'High',
-    });
-  });
+  // Tables
+  merged.tables.slice(0,10).forEach(tbl => generateTableTests(tbl, title, url, tests));
 
-  // ── 8. TABLE TESTS ────────────────────────────────────────
-  elements.tables.forEach((table, ti) => {
-    tests.ui.push({
-      id: nextId('UI-TABLE'), name: `[${title}] Table: "${table.id}" — Display`,
-      url, description: `Verify data table "${table.id}" displays correctly with ${table.rowCount} rows`,
-      preconditions: `On ${url}`,
-      testSteps: `1. Locate table "${table.id}" | 2. Verify headers: ${table.headers.slice(0,5).join(', ')} | 3. Count rows (expect ~${table.rowCount}) | 4. Verify data in cells | 5. Check for empty states`,
-      expectedResult: `Headers visible: ${table.headers.slice(0,3).join(', ')} | ${table.rowCount} data rows | Cells not empty | Responsive (horizontal scroll on mobile)`,
-      priority: 'High',
-    });
+  // Navigation links
+  const uniqueLinks = [...new Map(merged.navItems.map(n=>[n.href,n])).values()].slice(0,20);
+  if (uniqueLinks.length > 0) generateNavTests(uniqueLinks, title, url, tests);
 
-    if (table.headers.length > 0) {
-      // Sorting
-      tests.ui.push({
-        id: nextId('UI-TABLE'), name: `[${title}] Table: "${table.id}" — Column Sorting`,
-        url, description: `Verify table columns can be sorted`,
-        preconditions: `Table has sortable columns`,
-        testSteps: table.headers.slice(0, 4).map((h, i) =>
-          `${i+1}. Click column "${h}" | Verify ascending sort | Click again | Verify descending`
-        ).join(' | '),
-        expectedResult: `Sort indicator shown | Data sorted correctly | Toggle asc/desc works | Sort persists on page refresh`,
-        priority: 'Medium',
-      });
+  // Modals
+  merged.modals.slice(0,10).forEach((_, mi) => generateModalTests(mi+1, title, url, tests));
 
-      // Pagination
-      if (table.rowCount > 10) {
-        tests.ui.push({
-          id: nextId('UI-TABLE'), name: `[${title}] Table: "${table.id}" — Pagination`,
-          url, description: `Verify table pagination works with ${table.rowCount} rows`,
-          preconditions: `Table has more than 10 rows`,
-          testSteps: `1. Check rows per page (e.g. 10) | 2. Click Next page | 3. Verify different data | 4. Click Previous | 5. Verify back to first page | 6. Jump to last page | 7. Verify last ${table.rowCount % 10 || 10} rows`,
-          expectedResult: `10 rows per page by default | Next/Prev work | Page numbers shown | Last page shows remaining rows | URL updates with page param`,
-          priority: 'High',
-        });
-      }
-    }
-  });
+  // File inputs
+  merged.fileInputs.slice(0,5).forEach(fi => generateFileInputTests(fi, title, url, tests));
 
-  // ── 9. IMAGE TESTS ────────────────────────────────────────
-  const brokenImgCount  = elements.images.filter(img => !img.hasAlt).length;
-  const totalImgCount   = elements.images.length;
+  // Pagination
+  if (merged.pagination.length > 0) generatePaginationTests(merged.pagination[0], title, url, tests);
 
-  if (totalImgCount > 0) {
-    tests.ui.push({
-      id: nextId('UI-IMG'), name: `[${title}] Images — Alt Text (${totalImgCount} images)`,
-      url, description: `Verify all ${totalImgCount} images have alt text for accessibility`,
-      preconditions: `On ${url}`,
-      testSteps: `1. Open ${url} | 2. Right-click → Inspect | 3. Find all <img> tags | 4. Check alt attribute on each | 5. Verify decorative images have empty alt=""`,
-      expectedResult: `All ${totalImgCount} images have alt attribute | Content images: descriptive alt | Decorative images: alt="" | No missing alt attributes | ${brokenImgCount > 0 ? `⚠️ ${brokenImgCount} images missing alt` : '✅ All images have alt'}`,
-      priority: 'High',
-    });
-
-    tests.ui.push({
-      id: nextId('UI-IMG'), name: `[${title}] Images — Load & Display`,
-      url, description: `Verify all ${totalImgCount} images load without errors`,
-      preconditions: `On ${url} with network tab open`,
-      testSteps: `1. Open DevTools Network tab | 2. Filter by Img | 3. Navigate to ${url} | 4. Check all image requests | 5. Verify no 404 responses | 6. Verify images display correctly`,
-      expectedResult: `All ${totalImgCount} images return 200 | No broken images | Images not stretched/distorted | Images responsive`,
-      priority: 'Medium',
-    });
-  }
-
-  // ── 10. LINK TESTS ────────────────────────────────────────
-  const uniqueLinks = [...new Map(elements.links.map(l => [l.href, l])).values()]
-    .filter(l => !l.href.startsWith('mailto:') && !l.href.startsWith('tel:'))
-    .slice(0, 30);
-
-  if (uniqueLinks.length > 0) {
-    tests.ui.push({
-      id: nextId('UI-LINK'), name: `[${title}] Links — No Broken Links (${uniqueLinks.length})`,
-      url, description: `Verify all ${uniqueLinks.length} links on the page are not broken`,
-      preconditions: `On ${url}`,
-      testSteps: `1. Use broken link checker tool OR manually test | 2. Click each link | 3. Verify HTTP 200 response | 4. Check: ${uniqueLinks.slice(0,5).map(l=>l.text).join(', ')}`,
-      expectedResult: `All ${uniqueLinks.length} links return 200 or valid redirect | No 404, 500, or timeout | External links open in new tab | Internal links stay in same tab`,
-      priority: 'High',
-    });
-
-    // External links open in new tab
-    const externalLinks = uniqueLinks.filter(l => l.target === '_blank');
-    if (externalLinks.length > 0) {
-      tests.ui.push({
-        id: nextId('UI-LINK'), name: `[${title}] External Links — New Tab & rel=noopener`,
-        url, description: `Verify ${externalLinks.length} external links open in new tab securely`,
-        preconditions: `On ${url}`,
-        testSteps: externalLinks.slice(0, 5).map((l, i) =>
-          `${i+1}. Click "${l.text}" | Verify opens new tab | Check rel="${l.rel || 'missing'}"`
-        ).join(' | '),
-        expectedResult: `External links open new tab | All have rel="noopener noreferrer" | Original tab not affected | Links show visual indicator`,
-        priority: 'Medium',
-      });
-    }
-  }
-
-  // ── 11. HEADING STRUCTURE ─────────────────────────────────
-  if (elements.headings.length > 0) {
-    tests.ui.push({
-      id: nextId('UI-HEAD'), name: `[${title}] Heading Hierarchy`,
-      url, description: `Verify proper heading hierarchy (${elements.headings.length} headings found)`,
-      preconditions: `On ${url}`,
-      testSteps: `1. View page source | 2. Find all heading tags | 3. Verify H1 appears once | 4. Verify H2s are under H1 | 5. Verify no skipped levels | Headings: ${elements.headings.slice(0,5).map(h=>`H${h.level}:${h.text.substring(0,20)}`).join(', ')}`,
-      expectedResult: `Exactly 1 H1 | H2s come after H1 | No level skipping (e.g. H1→H3) | Headings are meaningful | ${elements.headings.filter(h=>h.level===1).length} H1, ${elements.headings.filter(h=>h.level===2).length} H2, ${elements.headings.filter(h=>h.level===3).length} H3 found`,
-      priority: 'Medium',
-    });
-  }
-
-  // ── 12. MODAL TESTS ───────────────────────────────────────
-  elements.modals.forEach((modal, mi) => {
-    tests.ui.push({
-      id: nextId('UI-MODAL'), name: `[${title}] Modal ${mi+1} — Open/Close`,
-      url, description: `Verify modal ${mi+1} opens, closes, and traps focus`,
-      preconditions: `On ${url} | Modal trigger accessible`,
-      testSteps: `1. Click element that opens modal | 2. Verify modal opens | 3. Verify background is blocked | 4. Tab through modal (focus trap) | 5. Click X or Cancel | 6. Verify closes | 7. Press Escape | 8. Verify closes`,
-      expectedResult: `Modal opens | Background blocked | Focus trapped in modal | X/Cancel closes | Escape closes | Focus returns to trigger | Body scroll locked`,
-      priority: 'High',
-    });
-  });
-
-  // ── 13. TAB TESTS ─────────────────────────────────────────
-  if (elements.tabs.length > 0) {
-    tests.ui.push({
-      id: nextId('UI-TAB'), name: `[${title}] Tab Component (${elements.tabs[0].count} tabs)`,
-      url, description: `Verify tab component switches content correctly`,
-      preconditions: `On ${url} | Tab component visible`,
-      testSteps: `1. Note active tab | 2. Click each tab in sequence | 3. Verify content changes | 4. Verify only one tab active | 5. Test keyboard: Arrow keys to navigate | 6. Press Enter/Space to activate`,
-      expectedResult: `Correct content shown per tab | Only one tab active | Inactive tab content hidden | Keyboard navigation works | ARIA attributes correct`,
-      priority: 'High',
-    });
-  }
-
-  // ── 14. PAGINATION TESTS ──────────────────────────────────
-  elements.pagination.forEach(pg => {
-    tests.ui.push({
-      id: nextId('UI-PAGE'), name: `[${title}] Pagination (${pg.maxPage} pages detected)`,
-      url, description: `Verify pagination navigates through all ${pg.maxPage} pages`,
-      preconditions: `On first page of ${url}`,
-      testSteps: `1. Verify page 1 active | 2. Click Next | 3. Verify page 2 loads | 4. Verify URL has ?page=2 | 5. Click page number 3 if available | 6. Verify page 3 | 7. Click Prev | 8. Verify page 2 | 9. Jump to last page (${pg.maxPage}) | 10. Verify Next disabled`,
-      expectedResult: `All ${pg.maxPage} pages accessible | URL updates per page | Next disabled on last | Prev disabled on first | Correct items shown per page`,
-      priority: 'High',
-    });
-  });
-
-  // ── 15. FILE UPLOAD TESTS ─────────────────────────────────
-  elements.fileInputs.forEach(fi => {
-    tests.ui.push({
-      id: nextId('UI-FILE'), name: `[${title}] File Upload: "${fi.name}"`,
-      url, description: `Verify file upload "${fi.name}" with all valid and invalid file types`,
-      preconditions: `On ${url} | File input visible`,
-      testSteps: `1. Click file upload | 2. Select valid file ${fi.accept || '(any)'} | 3. Verify file name shown | 4. Try uploading invalid type | 5. Verify rejected | 6. Try file > 10MB | 7. Verify size error | 8. Submit with file | 9. Verify upload succeeds`,
-      testData: `Accepted types: ${fi.accept || 'all'} | Multiple: ${fi.multiple}`,
-      expectedResult: `Valid file accepted | Invalid type rejected | Size limit enforced | Upload progress shown | Success/error feedback | File preview if image`,
-      priority: 'High',
-    });
-  });
-
-  // ── 16. IFRAME TESTS ──────────────────────────────────────
-  if ((html => /\<iframe/i.test(html))(elements.toString() || '')) {
-    tests.ui.push({
-      id: nextId('UI-IFRAME'), name: `[${title}] Iframe — Loads Correctly`,
-      url, description: `Verify embedded iframes load without errors`,
-      preconditions: `On ${url}`,
-      testSteps: `1. Identify all iframes | 2. Verify each loads | 3. Check no mixed content warnings | 4. Verify correct dimensions | 5. Check title attribute for accessibility`,
-      expectedResult: `All iframes load | No mixed content | Correct dimensions | title attribute present | No console security errors`,
-      priority: 'Medium',
-    });
-  }
-
-  // ── 17. ACCORDION TESTS ───────────────────────────────────
-  if (elements.accordions.length > 0) {
-    tests.ui.push({
-      id: nextId('UI-ACC'), name: `[${title}] Accordion — Expand/Collapse`,
-      url, description: `Verify accordion items expand and collapse`,
-      preconditions: `On ${url} | Accordion visible`,
-      testSteps: `1. All items collapsed initially | 2. Click item 1 | 3. Verify expands | 4. Click item 2 | 5. Verify expands (and 1 may collapse) | 6. Click open item | 7. Verify collapses | 8. Test keyboard Enter/Space`,
-      expectedResult: `Expand/collapse works | Content shows/hides | Smooth animation | Keyboard accessible | ARIA expanded state updates`,
-      priority: 'Medium',
-    });
-  }
+  // Tabs
+  if (merged.tabs.length > 0) generateTabTests(merged.tabs[0], title, url, tests);
 
   return tests;
 }
 
-// ── Cross-page test cases ─────────────────────────────────────
+// ── Infer page type from URL + title ─────────────────────────
+function inferPageType(url, title) {
+  const u = (url + ' ' + title).toLowerCase();
+  if (/login|signin|sign-in/.test(u))                          return 'auth-login';
+  if (/signup|sign-up|register|registration|create.*account/.test(u)) return 'auth-signup';
+  if (/forgot.*pass|reset.*pass|password.*reset/.test(u))      return 'auth-forgot';
+  if (/dashboard|home|overview|summary/.test(u))               return 'dashboard';
+  if (/profile|account|my.*account|user.*settings/.test(u))    return 'profile';
+  if (/settings|preferences|configuration|config/.test(u))     return 'settings';
+  if (/product|item|listing|catalogue|catalog|shop|store/.test(u)) return 'product-list';
+  if (/detail|single|view|item\/\d|product\//.test(u))         return 'product-detail';
+  if (/cart|basket/.test(u))                                   return 'cart';
+  if (/checkout|payment|billing|order/.test(u))                return 'checkout';
+  if (/order.*history|my.*orders|purchases/.test(u))           return 'order-history';
+  if (/search|results|find/.test(u))                           return 'search';
+  if (/contact|get.*touch|reach.*us/.test(u))                  return 'contact';
+  if (/about|team|company|who.*we|our.*story/.test(u))         return 'about';
+  if (/blog|news|article|post|press/.test(u))                  return 'blog';
+  if (/help|faq|support|docs|documentation|knowledge/.test(u)) return 'help';
+  if (/pricing|plans|subscription/.test(u))                    return 'pricing';
+  if (/\/$|^home/.test(u))                                     return 'home';
+  return 'generic';
+}
+
+// ── Infer elements from page type when HTML parsing fails ─────
+function inferElements(url, title, pageType, parsed) {
+  const inferred = { forms:[], inputs:[], buttons:[], selects:[], tables:[], navItems:[], modals:[], fileInputs:[], pagination:[], tabs:[], checkboxes:[], radios:[] };
+
+  switch(pageType) {
+    case 'auth-login':
+      inferred.forms.push({ id:'login-form', action:url, method:'POST', fields:[
+        { name:'email',    type:'email',    required:true,  pattern:'email' },
+        { name:'password', type:'password', required:true,  pattern:'minLength:8' },
+        { name:'remember', type:'checkbox', required:false, pattern:'' },
+      ]});
+      inferred.buttons.push({ text:'Login', type:'submit' }, { text:'Sign In', type:'submit' },
+        { text:'Forgot Password', type:'button' }, { text:'Sign up', type:'button' },
+        { text:'Continue with Google', type:'button' }, { text:'Continue with GitHub', type:'button' });
+      break;
+
+    case 'auth-signup':
+      inferred.forms.push({ id:'signup-form', action:url, method:'POST', fields:[
+        { name:'fullName',        type:'text',     required:true,  pattern:'minLength:3' },
+        { name:'email',           type:'email',    required:true,  pattern:'email' },
+        { name:'password',        type:'password', required:true,  pattern:'minLength:8' },
+        { name:'confirmPassword', type:'password', required:true,  pattern:'matchPassword' },
+        { name:'phone',           type:'tel',      required:false, pattern:'phone' },
+        { name:'terms',           type:'checkbox', required:true,  pattern:'' },
+        { name:'newsletter',      type:'checkbox', required:false, pattern:'' },
+      ]});
+      inferred.buttons.push({ text:'Sign Up', type:'submit' }, { text:'Create Account', type:'submit' },
+        { text:'Already have account', type:'button' });
+      break;
+
+    case 'auth-forgot':
+      inferred.forms.push({ id:'forgot-form', action:url, method:'POST', fields:[
+        { name:'email', type:'email', required:true, pattern:'email' },
+      ]});
+      inferred.buttons.push({ text:'Send Reset Link', type:'submit' }, { text:'Back to Login', type:'button' });
+      break;
+
+    case 'dashboard':
+      inferred.buttons.push(
+        { text:'New', type:'button' }, { text:'Create', type:'button' },
+        { text:'Add', type:'button' }, { text:'Refresh', type:'button' },
+        { text:'Export', type:'button' }, { text:'Filter', type:'button' },
+        { text:'View All', type:'button' }, { text:'Settings', type:'button' },
+      );
+      inferred.tables.push({ id:'dashboard-table', headers:['Name','Status','Date','Actions'], rowCount:10 });
+      inferred.modals.push({ index:1 }, { index:2 });
+      inferred.selects.push({ name:'date-range', required:false, multiple:false, options:['Today','This Week','This Month','This Year','Custom'] });
+      inferred.selects.push({ name:'status-filter', required:false, multiple:false, options:['All','Active','Inactive','Pending'] });
+      break;
+
+    case 'profile':
+      inferred.forms.push({ id:'profile-form', action:url, method:'PUT', fields:[
+        { name:'fullName',    type:'text',     required:true,  pattern:'minLength:3' },
+        { name:'email',       type:'email',    required:true,  pattern:'email' },
+        { name:'phone',       type:'tel',      required:false, pattern:'phone' },
+        { name:'bio',         type:'textarea', required:false, pattern:'maxLength:500' },
+        { name:'website',     type:'url',      required:false, pattern:'url' },
+        { name:'avatar',      type:'file',     required:false, pattern:'image/*' },
+      ]});
+      inferred.buttons.push({ text:'Save Changes', type:'submit' }, { text:'Cancel', type:'button' },
+        { text:'Change Password', type:'button' }, { text:'Delete Account', type:'button' },
+        { text:'Upload Photo', type:'button' });
+      inferred.fileInputs.push({ name:'avatar', accept:'image/*', multiple:false });
+      inferred.tabs.push({ count:3 }); // Profile, Security, Preferences
+      break;
+
+    case 'settings':
+      inferred.tabs.push({ count:4 }); // General, Security, Notifications, Billing
+      inferred.buttons.push({ text:'Save', type:'submit' }, { text:'Save Changes', type:'submit' },
+        { text:'Reset', type:'button' }, { text:'Delete Account', type:'button' });
+      inferred.selects.push({ name:'language', required:false, multiple:false, options:['English','French','Spanish','Arabic'] });
+      inferred.selects.push({ name:'timezone', required:false, multiple:false, options:['UTC','EST','PST','GMT','IST'] });
+      inferred.checkboxes.push({ name:'email-notifications', required:false },
+        { name:'sms-notifications', required:false }, { name:'marketing', required:false });
+      inferred.forms.push({ id:'settings-form', action:url, method:'PUT', fields:[
+        { name:'language', type:'select', required:false, pattern:'' },
+        { name:'timezone', type:'select', required:false, pattern:'' },
+      ]});
+      break;
+
+    case 'product-list':
+      inferred.buttons.push({ text:'Filter', type:'button' }, { text:'Sort', type:'button' },
+        { text:'Add to Cart', type:'button' }, { text:'Add to Wishlist', type:'button' },
+        { text:'View', type:'button' }, { text:'Quick View', type:'button' },
+        { text:'Load More', type:'button' });
+      inferred.selects.push({ name:'sort-by', required:false, multiple:false, options:['Price: Low to High','Price: High to Low','Newest','Popular','Rating'] });
+      inferred.selects.push({ name:'category', required:false, multiple:false, options:['All','Electronics','Clothing','Books','Sports'] });
+      inferred.selects.push({ name:'price-range', required:false, multiple:false, options:['All','Under $25','$25-$50','$50-$100','Over $100'] });
+      inferred.pagination.push({ maxPage:5, detected:true });
+      inferred.inputs.push({ name:'search', type:'search', required:false, placeholder:'Search products...', pattern:'' });
+      break;
+
+    case 'product-detail':
+      inferred.buttons.push({ text:'Add to Cart', type:'button' }, { text:'Buy Now', type:'button' },
+        { text:'Add to Wishlist', type:'button' }, { text:'Share', type:'button' },
+        { text:'Write Review', type:'button' }, { text:'Ask Question', type:'button' });
+      inferred.selects.push({ name:'quantity', required:true, multiple:false, options:['1','2','3','4','5','10'] });
+      inferred.selects.push({ name:'size', required:true, multiple:false, options:['XS','S','M','L','XL','XXL'] });
+      inferred.selects.push({ name:'color', required:true, multiple:false, options:['Red','Blue','Green','Black','White'] });
+      inferred.tabs.push({ count:3 }); // Description, Reviews, Q&A
+      break;
+
+    case 'cart':
+      inferred.buttons.push({ text:'Proceed to Checkout', type:'button' }, { text:'Remove', type:'button' },
+        { text:'Update Cart', type:'button' }, { text:'Apply Coupon', type:'button' },
+        { text:'Continue Shopping', type:'button' }, { text:'Save for Later', type:'button' });
+      inferred.inputs.push({ name:'coupon', type:'text', required:false, placeholder:'Coupon code', pattern:'' });
+      inferred.selects.push({ name:'quantity', required:false, multiple:false, options:['1','2','3','4','5'] });
+      break;
+
+    case 'checkout':
+      inferred.forms.push({ id:'checkout-form', action:url, method:'POST', fields:[
+        { name:'fullName',   type:'text',     required:true,  pattern:'minLength:3' },
+        { name:'email',      type:'email',    required:true,  pattern:'email' },
+        { name:'phone',      type:'tel',      required:true,  pattern:'phone' },
+        { name:'address',    type:'text',     required:true,  pattern:'minLength:10' },
+        { name:'city',       type:'text',     required:true,  pattern:'' },
+        { name:'state',      type:'text',     required:true,  pattern:'' },
+        { name:'zipCode',    type:'text',     required:true,  pattern:'zip' },
+        { name:'country',    type:'select',   required:true,  pattern:'' },
+        { name:'cardNumber', type:'text',     required:true,  pattern:'creditCard' },
+        { name:'cardExpiry', type:'text',     required:true,  pattern:'MM/YY' },
+        { name:'cardCvv',    type:'text',     required:true,  pattern:'digits:3-4' },
+        { name:'cardName',   type:'text',     required:true,  pattern:'minLength:3' },
+        { name:'saveCard',   type:'checkbox', required:false, pattern:'' },
+      ]});
+      inferred.radios.push({ name:'payment-method', value:'card' }, { name:'payment-method', value:'paypal' }, { name:'payment-method', value:'bank' });
+      inferred.buttons.push({ text:'Place Order', type:'submit' }, { text:'Pay Now', type:'submit' }, { text:'Back', type:'button' });
+      break;
+
+    case 'search':
+      inferred.forms.push({ id:'search-form', action:url, method:'GET', fields:[
+        { name:'q', type:'search', required:true, pattern:'' },
+      ]});
+      inferred.selects.push({ name:'category', required:false, multiple:false, options:['All','Products','Blog','Users'] });
+      inferred.selects.push({ name:'sort', required:false, multiple:false, options:['Relevance','Newest','Popular'] });
+      inferred.buttons.push({ text:'Search', type:'submit' }, { text:'Clear', type:'button' }, { text:'Filter', type:'button' });
+      inferred.pagination.push({ maxPage:10, detected:true });
+      break;
+
+    case 'contact':
+      inferred.forms.push({ id:'contact-form', action:url, method:'POST', fields:[
+        { name:'name',    type:'text',     required:true,  pattern:'minLength:3' },
+        { name:'email',   type:'email',    required:true,  pattern:'email' },
+        { name:'phone',   type:'tel',      required:false, pattern:'phone' },
+        { name:'subject', type:'text',     required:true,  pattern:'minLength:5' },
+        { name:'message', type:'textarea', required:true,  pattern:'minLength:20' },
+        { name:'terms',   type:'checkbox', required:true,  pattern:'' },
+      ]});
+      inferred.selects.push({ name:'department', required:false, multiple:false, options:['Sales','Support','Billing','Technical','General'] });
+      inferred.buttons.push({ text:'Send Message', type:'submit' }, { text:'Clear', type:'button' });
+      break;
+
+    case 'home':
+      inferred.buttons.push({ text:'Get Started', type:'button' }, { text:'Sign Up Free', type:'button' },
+        { text:'Learn More', type:'button' }, { text:'View Demo', type:'button' },
+        { text:'Contact Sales', type:'button' }, { text:'Watch Video', type:'button' });
+      inferred.modals.push({ index:1 }); // Newsletter/promo popup
+      break;
+
+    case 'pricing':
+      inferred.buttons.push({ text:'Get Started', type:'button' }, { text:'Start Free Trial', type:'button' },
+        { text:'Contact Sales', type:'button' }, { text:'Upgrade', type:'button' },
+        { text:'Choose Plan', type:'button' });
+      inferred.radios.push({ name:'billing', value:'monthly' }, { name:'billing', value:'annual' });
+      break;
+
+    case 'blog':
+      inferred.inputs.push({ name:'search', type:'search', required:false, placeholder:'Search articles...', pattern:'' });
+      inferred.selects.push({ name:'category', required:false, multiple:false, options:['All','Technology','News','Updates','Tutorials'] });
+      inferred.pagination.push({ maxPage:5, detected:true });
+      inferred.buttons.push({ text:'Read More', type:'button' }, { text:'Subscribe', type:'button' });
+      break;
+
+    default:
+      // Generic page — add common elements
+      inferred.buttons.push({ text:'Submit', type:'button' }, { text:'Cancel', type:'button' },
+        { text:'Save', type:'button' }, { text:'Edit', type:'button' });
+  }
+
+  return inferred;
+}
+
+// ── Merge parsed and inferred elements ───────────────────────
+function mergeElements(parsed, inferred) {
+  const merge = (a, b) => {
+    const combined = [...a, ...b];
+    // Simple dedup by name/id
+    return combined.filter((item, idx) => {
+      const key = item.name || item.text || item.id || idx;
+      return combined.findIndex(x => (x.name||x.text||x.id) === key) === idx;
+    });
+  };
+
+  return {
+    forms:      merge(parsed.forms,      inferred.forms),
+    inputs:     merge(parsed.inputs,     inferred.inputs),
+    buttons:    merge(parsed.buttons,    inferred.buttons),
+    selects:    merge(parsed.selects,    inferred.selects),
+    tables:     merge(parsed.tables,     inferred.tables),
+    navItems:   merge(parsed.navItems,   inferred.navItems),
+    modals:     merge(parsed.modals,     inferred.modals),
+    fileInputs: merge(parsed.fileInputs, inferred.fileInputs),
+    pagination: merge(parsed.pagination, inferred.pagination),
+    tabs:       merge(parsed.tabs,       inferred.tabs),
+    checkboxes: merge(parsed.checkboxes||[], inferred.checkboxes||[]),
+    radios:     merge(parsed.radios||[],     inferred.radios||[]),
+    headings:   parsed.headings || [],
+    images:     parsed.images   || [],
+    links:      parsed.links    || [],
+    accordions: parsed.accordions || [],
+  };
+}
+
+// ── Generate page-type specific tests ────────────────────────
+function generatePageTypeTests(pageType, title, url, elements, tests, pageIdx, hasAuth, authCredentials) {
+  switch(pageType) {
+    case 'auth-login':
+      generateAuthLoginTests(title, url, tests, hasAuth, authCredentials);
+      break;
+    case 'auth-signup':
+      generateAuthSignupTests(title, url, tests);
+      break;
+    case 'auth-forgot':
+      generateAuthForgotTests(title, url, tests);
+      break;
+    case 'dashboard':
+      generateDashboardTests(title, url, tests);
+      break;
+    case 'profile':
+      generateProfileTests(title, url, tests);
+      break;
+    case 'settings':
+      generateSettingsTests(title, url, tests);
+      break;
+    case 'product-list':
+      generateProductListTests(title, url, tests);
+      break;
+    case 'product-detail':
+      generateProductDetailTests(title, url, tests);
+      break;
+    case 'cart':
+      generateCartTests(title, url, tests);
+      break;
+    case 'checkout':
+      generateCheckoutTests(title, url, tests);
+      break;
+    case 'search':
+      generateSearchTests(title, url, tests);
+      break;
+    case 'contact':
+      generateContactTests(title, url, tests);
+      break;
+    case 'pricing':
+      generatePricingTests(title, url, tests);
+      break;
+    default:
+      generateGenericPageTests(title, url, tests);
+  }
+}
+
+// ── Auth Login Tests ──────────────────────────────────────────
+function generateAuthLoginTests(title, url, tests, hasAuth, creds) {
+  const scenarios = [
+    ['Valid credentials',         creds?.username||'user@test.com', creds?.password||'Pass123!', 'Login successful | Redirect to dashboard | Token stored'],
+    ['Invalid email',             'notanemail',                     'Pass123!',                  'Validation error: invalid email format'],
+    ['Invalid password',          'user@test.com',                  'wrongpass',                 'Error: Invalid credentials | No redirect'],
+    ['Empty email',               '',                               'Pass123!',                  'Required field error on email'],
+    ['Empty password',            'user@test.com',                  '',                          'Required field error on password'],
+    ['Both empty',                '',                               '',                           'Required errors on both fields'],
+    ['SQL injection in email',    "' OR '1'='1",                   'Pass123!',                  'Input rejected | No SQL error exposed'],
+    ['XSS in email',              '<script>alert(1)</script>',      'Pass123!',                  'Input sanitised | No XSS executed'],
+    ['Very long email',           'a'.repeat(200) + '@test.com',   'Pass123!',                  'Validation error or truncation'],
+    ['Case insensitive email',    'USER@TEST.COM',                  creds?.password||'Pass123!', 'Login treats email as case-insensitive'],
+    ['Password with spaces',      'user@test.com',                  'Pass 123 !',                'Password with spaces handled correctly'],
+    ['Brute force protection',    'user@test.com',                  'wrong',                     'Account locked or rate limited after 5 failures'],
+    ['Remember me checked',       creds?.username||'user@test.com', creds?.password||'Pass123!', 'Session persists across browser restart'],
+    ['Remember me unchecked',     creds?.username||'user@test.com', creds?.password||'Pass123!', 'Session expires when browser closes'],
+    ['Enter key submission',      creds?.username||'user@test.com', creds?.password||'Pass123!', 'Form submits on Enter key press'],
+    ['Paste into password',       creds?.username||'user@test.com', creds?.password||'Pass123!', 'Password can be pasted into field'],
+    ['Show/hide password toggle', 'user@test.com',                  creds?.password||'Pass123!', 'Eye icon toggles password visibility'],
+    ['Tab order',                 '',                               '',                           'Tab moves: Email → Password → Remember → Submit'],
+    ['Auto-fill support',         '',                               '',                           'Browser auto-fill populates fields correctly'],
+    ['Redirect after login',      creds?.username||'user@test.com', creds?.password||'Pass123!', 'Redirects to originally requested page'],
+  ];
+
+  scenarios.forEach(([name, email, pass, expected]) => {
+    tests.ui.push(tc('UI-AUTH', `[${title}] Login — ${name}`, url,
+      `Test login with: ${name}`,
+      `Login form visible | Fields empty`,
+      `1. Enter email: "${email}" | 2. Enter password: "${pass}" | 3. ${name.includes('Enter key') ? 'Press Enter' : 'Click Login'} | 4. Verify result`,
+      expected, name.includes('Valid') || name.includes('SQL') || name.includes('XSS') ? 'Critical' : 'High'));
+  });
+}
+
+// ── Auth Signup Tests ─────────────────────────────────────────
+function generateAuthSignupTests(title, url, tests) {
+  const scenarios = [
+    ['All valid data',            'Test passes | Account created | Redirect to dashboard or verify email'],
+    ['Duplicate email',           'Error: Email already registered | No duplicate account created'],
+    ['Invalid email format',      'Validation error: Please enter a valid email'],
+    ['Password too short (<8)',   'Validation error: Password must be at least 8 characters'],
+    ['Password no uppercase',     'Validation error: Password must contain uppercase letter'],
+    ['Password no number',        'Validation error: Password must contain a number'],
+    ['Passwords do not match',    'Validation error: Passwords do not match'],
+    ['All fields empty',          'Required errors on all required fields'],
+    ['Terms not checked',         'Validation error: You must accept terms'],
+    ['XSS in name field',         'Input sanitised | No script execution'],
+    ['SQL injection in email',    'Input rejected | No database error'],
+    ['Very long name (200 chars)','Validation error or truncation applied'],
+    ['Emoji in name',             'Emoji handled correctly | Stored or rejected gracefully'],
+    ['International email',       'International email formats accepted'],
+    ['Weak password',             'Strength indicator shows weak | Warning shown'],
+    ['Strong password',           'Strength indicator shows strong | Green state'],
+    ['Already logged in',         'Redirect to dashboard | No duplicate session'],
+    ['Social signup button',      'Redirects to OAuth provider | Callback handled'],
+    ['Email verification',        'Verification email sent | Account inactive until verified'],
+    ['Phone number optional',     'Form submits without phone | Phone validation when provided'],
+  ];
+
+  scenarios.forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-AUTH', `[${title}] Signup — ${name}`, url,
+      `Signup scenario: ${name}`,
+      `Signup form visible`,
+      `1. Fill form for scenario: "${name}" | 2. Submit | 3. Verify: ${expected}`,
+      expected, name.includes('valid') || name.includes('SQL') || name.includes('XSS') ? 'Critical' : 'High'));
+  });
+}
+
+function generateAuthForgotTests(title, url, tests) {
+  [
+    ['Valid email',           'Reset email sent | Success message shown'],
+    ['Unregistered email',    'Success message shown (don\'t reveal if email exists)'],
+    ['Invalid email format',  'Validation error'],
+    ['Empty email',           'Required field error'],
+    ['SQL injection',         'Input rejected'],
+    ['Rate limiting',         'Limited to 3-5 requests per hour'],
+    ['Reset link expiry',     'Link expires in 1 hour'],
+    ['One-time use link',     'Link invalid after first use'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-AUTH', `[${title}] Forgot Password — ${name}`, url, name, 'Form visible',
+      `1. Enter email for: ${name} | 2. Submit | 3. Verify`, expected, 'High'));
+  });
+}
+
+// ── Dashboard Tests ───────────────────────────────────────────
+function generateDashboardTests(title, url, tests) {
+  [
+    ['Loads with user data',              'User name shown | Correct data displayed | No placeholder text'],
+    ['Stats cards display correctly',     'All metrics visible | Numbers formatted | No NaN or undefined'],
+    ['Charts render',                     'Chart visible | Data plotted | Legend shown | Interactive on hover'],
+    ['Recent activity list',              'Latest items shown | Timestamps correct | Links to detail pages work'],
+    ['Quick action buttons work',         'Each button triggers correct action | Loading states shown'],
+    ['Date range filter works',           'Selecting range updates data | Charts refresh | Tables update'],
+    ['Search/filter on tables',           'Search input filters results | No results state shown'],
+    ['Sorting table columns',             'Click header sorts asc | Click again sorts desc | Icon updates'],
+    ['Pagination on data tables',         'Next/prev work | Page numbers correct | Items per page selector'],
+    ['Empty state when no data',          'Helpful empty state message | Create/add button shown'],
+    ['Refresh data button',               'Clicking refresh fetches latest | Loading spinner shown'],
+    ['Export data',                       'Export triggers download | Correct format | All data included'],
+    ['Notifications badge',               'Badge count correct | Clicking opens notification list'],
+    ['User menu dropdown',                'Clicking avatar opens menu | Profile/Logout links work'],
+    ['Sidebar navigation',                'All menu items clickable | Active state shown | Collapsed on mobile'],
+    ['Breadcrumbs',                       'Path is correct | Clicking navigates correctly'],
+    ['Logout from dashboard',             'Redirects to login | Session cleared | Token removed'],
+    ['Inactivity timeout',                'Session expires after inactivity | Redirect to login with message'],
+    ['Multiple browser tabs',             'Changes in one tab reflect in another | No conflicts'],
+    ['Deep link to dashboard section',    'URL with hash or param loads correct section'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-DASH', `[${title}] Dashboard — ${name}`, url, name, 'Logged in | Dashboard loaded',
+      `1. Verify: ${name} | Steps specific to scenario`, expected, 'High'));
+  });
+}
+
+// ── Profile Tests ─────────────────────────────────────────────
+function generateProfileTests(title, url, tests) {
+  [
+    ['View own profile',              'All user data displayed correctly'],
+    ['Edit name — valid',             'Name saved | Success toast shown'],
+    ['Edit email — valid',            'Verification sent to new email | Not updated until verified'],
+    ['Edit phone — valid format',     'Phone saved | Formatted correctly'],
+    ['Edit phone — invalid format',   'Validation error shown'],
+    ['Upload avatar — valid image',   'Image uploaded | Preview shown | Saved'],
+    ['Upload avatar — wrong type',    'Error: Only JPG/PNG/GIF accepted'],
+    ['Upload avatar — too large',     'Error: File must be under 2MB'],
+    ['Remove avatar',                 'Default avatar shown | Change saved'],
+    ['Change password — valid',       'Password updated | Re-login required or session refreshed'],
+    ['Change password — wrong current', 'Error: Current password incorrect'],
+    ['Change password — mismatch',    'Error: Passwords do not match'],
+    ['Bio — max length (500 chars)',  'Accepts 500 chars | Rejects 501+ | Counter shown'],
+    ['Website URL — valid',           'URL saved | Validated as valid URL'],
+    ['Website URL — invalid',         'Validation error: Enter a valid URL'],
+    ['Cancel edit',                   'Changes discarded | Original data restored'],
+    ['Save with no changes',          'No unnecessary API calls | UI unchanged'],
+    ['Delete account',                'Confirmation dialog | Account deleted | Redirect to home'],
+    ['Two-factor authentication tab', '2FA setup flow works | QR code shown'],
+    ['API key generation',            'New key generated | Old key invalidated | Key copiable'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-PROFILE', `[${title}] Profile — ${name}`, url, name, 'Logged in | On profile page',
+      `1. Perform: ${name} | 2. Verify: ${expected}`, expected, name.includes('Delete') ? 'Critical' : 'High'));
+  });
+}
+
+// ── Settings Tests ────────────────────────────────────────────
+function generateSettingsTests(title, url, tests) {
+  [
+    ['Language change',                'Page reloads in selected language | Persists on refresh'],
+    ['Timezone change',                'Times shown in new timezone | Saved to profile'],
+    ['Email notifications toggle',     'Toggle saves | Emails sent/not-sent based on setting'],
+    ['SMS notifications toggle',       'Toggle saves | SMS behaviour changes'],
+    ['Marketing emails toggle',        'Can opt out | Complies with GDPR/CAN-SPAM'],
+    ['Theme change (dark/light)',      'Theme applied immediately | Persists across sessions'],
+    ['Currency change',                'Prices shown in selected currency | Rates correct'],
+    ['Privacy settings',               'Data sharing toggles work | GDPR compliance'],
+    ['Connected accounts',             'OAuth accounts shown | Can disconnect | Can reconnect'],
+    ['API keys management',            'Keys listed | Revoke works | Create new key works'],
+    ['Billing info update',            'Card updated | Receipt sent | Old card removed'],
+    ['Plan upgrade/downgrade',         'Correct plan selected | Payment processed | Features change'],
+    ['Delete data request',            'GDPR right to erasure | Confirmation required | Processed in 30 days'],
+    ['Export data',                    'Data export triggered | Email sent with download link'],
+    ['Tab: General settings',          'General settings tab loads and saves'],
+    ['Tab: Security settings',         'Security tab shows 2FA, sessions, password'],
+    ['Tab: Notification settings',     'Notification preferences all present and saveable'],
+    ['Tab: Billing settings',          'Billing tab shows plan, invoices, payment method'],
+    ['Active sessions list',           'All sessions shown | Can revoke other sessions'],
+    ['Session revoke',                 'Other session invalidated | That device logged out'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-SETTINGS', `[${title}] Settings — ${name}`, url, name, 'Logged in | Settings page',
+      `1. ${name} | 2. Verify: ${expected}`, expected, 'High'));
+  });
+}
+
+// ── Product List Tests ────────────────────────────────────────
+function generateProductListTests(title, url, tests) {
+  [
+    ['Products load on page visit',          'Products visible | Images load | Names/prices shown'],
+    ['Sort by price — low to high',          'Products sorted ascending by price'],
+    ['Sort by price — high to low',          'Products sorted descending by price'],
+    ['Sort by newest',                       'Most recent products shown first'],
+    ['Sort by popularity',                   'Most popular products shown first'],
+    ['Filter by category',                   'Only selected category shown | Count updates'],
+    ['Filter by price range',                'Only products within range shown'],
+    ['Filter by rating',                     'Only products with selected rating shown'],
+    ['Multiple filters combined',            'All filters applied together | Correct results'],
+    ['Clear all filters',                    'All products shown | Filter UI reset'],
+    ['Search within products',               'Relevant products shown | Highlights search term'],
+    ['Search — no results',                  'Empty state shown | "No products found" message'],
+    ['Pagination — next page',               'Page 2 loads | Different products shown | URL updates'],
+    ['Pagination — previous page',           'Page 1 reloads | Same products as initially'],
+    ['Pagination — jump to specific page',   'Correct page loads | Items correct'],
+    ['Items per page selector',              'Changing to 24/48 shows correct count'],
+    ['Grid/list view toggle',                'View changes | Products reflow | Preference saved'],
+    ['Add to cart from listing',             'Item added | Cart count increments | Confirmation shown'],
+    ['Add to wishlist',                      'Item saved to wishlist | Icon state changes'],
+    ['Product card hover',                   'Hover shows quick actions | Quick view option'],
+    ['Out of stock products',                'Marked as out of stock | Add to cart disabled'],
+    ['Sale/discount badge',                  'Discounted price shown | Original price struck through'],
+    ['Rating stars display',                 'Stars match rating | Correct out of 5'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-PRODUCTS', `[${title}] Products — ${name}`, url, name, 'Products page loaded',
+      `1. ${name} | 2. Verify: ${expected}`, expected, 'High'));
+  });
+}
+
+// ── Product Detail Tests ──────────────────────────────────────
+function generateProductDetailTests(title, url, tests) {
+  [
+    ['Product images load',              'Main image visible | Thumbnails shown | No broken images'],
+    ['Image zoom on hover',              'Zoomed view appears | Shows detail'],
+    ['Image gallery navigation',        'Prev/next arrows work | Thumbnails clickable'],
+    ['Product name and price visible',  'Name prominent | Price correct | Currency shown'],
+    ['Size selection',                  'All sizes shown | Selecting updates price if applicable'],
+    ['Colour selection',                'All colours shown | Selecting updates main image'],
+    ['Quantity selector',               'Can increase/decrease | Min 1 enforced | Max stock enforced'],
+    ['Add to cart — valid selection',   'Added to cart | Cart count increments | Success message'],
+    ['Add to cart — no size selected',  'Error: Please select a size | Not added to cart'],
+    ['Buy now button',                  'Proceeds to checkout with this item | Cart not persisted'],
+    ['Add to wishlist',                 'Saved | Icon filled | Can be removed'],
+    ['Share product',                   'Share options shown | Correct URL copied'],
+    ['Product description tab',         'Full description shown | Formatted correctly'],
+    ['Reviews tab',                     'Reviews listed | Average rating shown | Pagination works'],
+    ['Write review',                    'Review form opens | Star rating required | Text required'],
+    ['Q&A tab',                         'Questions shown | Can ask question | Answers shown'],
+    ['Related products',                'Similar products shown | Links work | Images load'],
+    ['Breadcrumb navigation',           'Path shown | Clicking navigates correctly'],
+    ['Stock indicator',                 'In stock / low stock / out of stock shown correctly'],
+    ['Shipping information',            'Delivery estimate shown | Shipping cost shown'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-PRODUCT', `[${title}] Product — ${name}`, url, name, 'Product detail page loaded',
+      `1. ${name} | 2. Verify: ${expected}`, expected, 'High'));
+  });
+}
+
+// ── Cart Tests ────────────────────────────────────────────────
+function generateCartTests(title, url, tests) {
+  [
+    ['Empty cart state',              '"Your cart is empty" message | Continue shopping button'],
+    ['Item displays correctly',       'Name, price, image, quantity shown'],
+    ['Update quantity — increase',    'Quantity increases | Subtotal updates | Total updates'],
+    ['Update quantity — decrease',    'Quantity decreases | Cannot go below 1'],
+    ['Remove item',                   'Item removed | Total recalculated | Empty state if last item'],
+    ['Apply valid coupon',            'Discount applied | Coupon shown | Total reduced'],
+    ['Apply invalid coupon',          'Error: Invalid coupon code | Total unchanged'],
+    ['Apply expired coupon',          'Error: Coupon expired | Total unchanged'],
+    ['Remove coupon',                 'Coupon removed | Original total restored'],
+    ['Subtotal calculation',          'Sum of items matches subtotal'],
+    ['Tax calculation',               'Tax percentage applied correctly | Amount shown'],
+    ['Shipping calculation',          'Shipping cost shown | Free shipping threshold applied'],
+    ['Total calculation',             'Subtotal + tax + shipping = total'],
+    ['Proceed to checkout',           'Navigates to checkout | Cart items passed'],
+    ['Save cart for later',           'Items saved | Available on next login'],
+    ['Cart persists on refresh',      'Items still in cart after page refresh'],
+    ['Cart syncs across devices',     'Adding on mobile shows on desktop (if logged in)'],
+    ['Out of stock item in cart',     'Warning shown | Cannot proceed | Remove prompted'],
+    ['Quantity exceeds stock',        'Quantity capped at available stock | Warning shown'],
+    ['Continue shopping link',        'Returns to products page | Cart preserved'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-CART', `[${title}] Cart — ${name}`, url, name, 'Cart page | Items in cart',
+      `1. ${name} | 2. Verify: ${expected}`, expected, name.includes('calculation') ? 'Critical' : 'High'));
+  });
+}
+
+// ── Checkout Tests ────────────────────────────────────────────
+function generateCheckoutTests(title, url, tests) {
+  [
+    ['Valid complete order',                'Order placed | Confirmation email | Order number shown'],
+    ['Missing required shipping field',     'Validation error on missing field | Cannot proceed'],
+    ['Invalid card number',                 'Error: Invalid card number | Not charged'],
+    ['Expired card',                        'Error: Card expired | Not charged'],
+    ['Insufficient funds',                  'Error: Payment declined | Not charged'],
+    ['CVV mismatch',                        'Error: Invalid security code | Not charged'],
+    ['Billing address validation',          'Zip/postcode validated | Country required'],
+    ['Guest checkout',                      'Can checkout without account | Email required'],
+    ['Logged in checkout',                  'Address pre-filled | Saved cards shown'],
+    ['Address saved for future',           '"Save this address" checkbox works'],
+    ['Order summary visible',              'Items, quantities, prices correct'],
+    ['Back to cart',                       'Returns to cart | No data lost'],
+    ['Order confirmation page',            'Order number shown | Details correct | Email sent'],
+    ['Payment loading state',             'Button shows loading | Cannot double-submit'],
+    ['3D Secure flow',                    'Redirect to bank | Return to site | Order confirmed'],
+    ['PayPal payment',                    'Redirect to PayPal | Return | Order confirmed'],
+    ['Promo code applied at checkout',    'Discount visible in order summary'],
+    ['Tax exemption',                     'Tax removed for exempt users/regions'],
+    ['International shipping',            'Country selection updates shipping options and cost'],
+    ['Order placed while logged out',     'Guest order tracked by email | No account required'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-CHECKOUT', `[${title}] Checkout — ${name}`, url, name, 'Checkout page | Items in cart',
+      `1. ${name} | 2. Verify: ${expected}`, expected, name.includes('Valid') || name.includes('Invalid') ? 'Critical' : 'High'));
+  });
+}
+
+// ── Search Tests ──────────────────────────────────────────────
+function generateSearchTests(title, url, tests) {
+  [
+    ['Search valid keyword',          'Relevant results shown | Keyword highlighted'],
+    ['Search empty string',           'All results shown or error message'],
+    ['Search no results',             '"No results found" message | Suggestions shown'],
+    ['Search special characters',     'Handled gracefully | No errors | Escaped correctly'],
+    ['Search SQL injection',          'Input sanitised | No DB error'],
+    ['Search XSS',                    'Input escaped | No script execution'],
+    ['Search autocomplete',           'Suggestions appear as you type | Relevant options'],
+    ['Search history',                'Recent searches shown | Can clear history'],
+    ['Filter by category',            'Results filtered to category | Count updates'],
+    ['Sort results',                  'Sorting changes order | Correct sort applied'],
+    ['Pagination of results',         'Multiple pages navigate correctly'],
+    ['Search URL shareable',          'URL contains search query | Can be shared'],
+    ['Back button preserves search',  'Back returns to same results | Query preserved'],
+    ['Clear search',                  'X button clears input | Results reset'],
+    ['Search on Enter key',           'Pressing Enter submits search'],
+    ['Advanced search filters',       'Additional filters refine results'],
+    ['Search result click tracking',  'Clicking result navigates to correct page'],
+    ['Typo tolerance',                'Slight typos return relevant results'],
+    ['Plural/singular handling',      '"phones" and "phone" return same results'],
+    ['Numeric search',                'Searching numbers returns relevant results'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-SEARCH', `[${title}] Search — ${name}`, url, name, 'Search page loaded',
+      `1. ${name} | 2. Verify: ${expected}`, expected, name.includes('SQL') || name.includes('XSS') ? 'Critical' : 'High'));
+  });
+}
+
+// ── Contact Tests ─────────────────────────────────────────────
+function generateContactTests(title, url, tests) {
+  [
+    ['Valid message sent',            'Success message shown | Email received | Auto-reply sent'],
+    ['Name too short',                'Validation error: Name must be at least 3 characters'],
+    ['Invalid email',                 'Validation error: Enter a valid email address'],
+    ['Message too short',             'Validation error: Message must be at least 20 characters'],
+    ['All fields empty',              'Required errors on all required fields'],
+    ['XSS in message',                'Input sanitised | No script execution'],
+    ['HTML in message',               'HTML tags escaped | Not rendered as HTML'],
+    ['Very long message',             'Accepted up to limit | Counter shown | Truncated if needed'],
+    ['Spam submission (too fast)',    'Rate limited | CAPTCHA triggered | Error shown'],
+    ['File attachment (if supported)', 'File attached | Size limit enforced | Type validated'],
+    ['Department selection',          'Correct department receives email'],
+    ['Phone number optional',         'Submits without phone | Validation when provided'],
+    ['Double submission prevention',  'Submit button disabled after click | No duplicate emails'],
+    ['Terms/privacy checkbox',        'Required if present | Form blocked without check'],
+    ['Auto-reply received',           'User receives confirmation email within 1 minute'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-CONTACT', `[${title}] Contact — ${name}`, url, name, 'Contact form visible',
+      `1. ${name} | 2. Verify: ${expected}`, expected, name.includes('XSS') || name.includes('SQL') ? 'Critical' : 'High'));
+  });
+}
+
+// ── Pricing Tests ─────────────────────────────────────────────
+function generatePricingTests(title, url, tests) {
+  [
+    ['All plans displayed',           'Free, Pro, Enterprise plans visible | Prices shown'],
+    ['Monthly/annual toggle',         'Prices update when switching | Savings shown'],
+    ['Feature comparison visible',    'Features listed per plan | Checkmarks/crosses correct'],
+    ['CTA button per plan',           'Each plan has a button | Links to correct signup'],
+    ['Current plan highlighted',      'If logged in, current plan marked'],
+    ['FAQ section',                   'FAQ items expand/collapse | Content helpful'],
+    ['Contact sales for enterprise',  'Enterprise CTA opens contact form or modal'],
+    ['Free plan limitations clear',   'Limits clearly stated | Not misleading'],
+    ['Upgrade from free',             'Upgrade flow accessible | Correct plan pre-selected'],
+    ['Trial period shown',            'Trial duration clear | No credit card note'],
+    ['Money back guarantee',          'Guarantee terms shown | Visible and clear'],
+    ['Currency selector',             'Prices shown in user\'s currency | Correct conversion'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-PRICING', `[${title}] Pricing — ${name}`, url, name, 'Pricing page loaded',
+      `1. Verify: ${name} | Steps: ${name}`, expected, 'High'));
+  });
+}
+
+// ── Generic Page Tests ────────────────────────────────────────
+function generateGenericPageTests(title, url, tests) {
+  [
+    ['Content loads completely',      'All text visible | No placeholder content | No lorem ipsum'],
+    ['Images load correctly',         'All images visible | No broken image icons'],
+    ['Links are functional',          'All links lead to correct pages | No 404s'],
+    ['CTAs are prominent',            'Call-to-action buttons visible | Above fold | Clear text'],
+    ['Page scroll works',             'Page scrolls smoothly | Sticky elements stay in place'],
+    ['Back button works',             'Browser back navigates correctly | No infinite loops'],
+    ['Print layout',                  'Print CSS applied | Content readable when printed'],
+    ['Footer links work',             'All footer links navigate correctly | No 404s'],
+    ['Social media links',            'Social links open correct profiles in new tab'],
+    ['Cookie consent',                'Cookie banner shown | Accept/Decline works | Preference saved'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-GEN', `[${title}] ${name}`, url, name, 'Page loaded',
+      `1. ${name} | 2. Verify: ${expected}`, expected, 'Medium'));
+  });
+}
+
+// ── Form Tests (for any form found/inferred) ──────────────────
+function generateFormTests(form, fi, title, url, tests) {
+  const label = form.id || `Form ${fi+1}`;
+
+  tests.ui.push(tc('UI-FORM', `[${title}] ${label} — Renders with all fields`, url,
+    `${label} visible with all ${form.fields.length} fields`,
+    `On ${url} | Form visible`,
+    `1. Navigate to ${url} | 2. Locate ${label} | 3. Count fields | 4. Verify ${form.fields.length} fields | 5. Check labels | 6. Check submit button`,
+    `All ${form.fields.length} fields visible | Labels present | Submit button enabled | Tab order logical`,
+    'Critical'));
+
+  form.fields.forEach((field, fIdx) => {
+    const valid   = getSampleValid(field.type, field.name);
+    const invalid = getSampleInvalid(field.type);
+
+    if (field.required) {
+      tests.ui.push(tc('UI-FIELD', `[${title}] ${label} → "${field.name}" — Required validation`, url,
+        `"${field.name}" shows error when empty`,
+        `${label} loaded`,
+        `1. Leave "${field.name}" empty | 2. Fill all other required fields | 3. Submit | 4. Verify error | 5. Enter "${valid}" | 6. Verify accepted`,
+        `Error shown when empty | Accepted with valid value: "${valid}"`,
+        'Critical'));
+    }
+
+    tests.ui.push(tc('UI-FIELD', `[${title}] ${label} → "${field.name}" — Valid input (${field.type})`, url,
+      `"${field.name}" accepts valid ${field.type} input`,
+      `${label} loaded`,
+      `1. Click "${field.name}" | 2. Enter "${valid}" | 3. Tab away | 4. Verify no error | 5. Verify value retained`,
+      `"${valid}" accepted | No validation error | Value retained`,
+      field.required ? 'High' : 'Medium'));
+
+    if (invalid) {
+      tests.ui.push(tc('UI-FIELD', `[${title}] ${label} → "${field.name}" — Invalid input`, url,
+        `"${field.name}" rejects invalid input`,
+        `${label} loaded`,
+        `1. Enter "${invalid}" in "${field.name}" | 2. Tab away or submit | 3. Verify error shown`,
+        `Validation error shown | Helpful message | Field highlighted`,
+        'High'));
+    }
+
+    tests.security.push(tc('SEC-FIELD', `[${title}] ${label} → "${field.name}" — XSS injection`, url,
+      `XSS prevention in "${field.name}"`,
+      `${label} loaded`,
+      `1. Enter <script>alert('xss-${field.name}')</script> | 2. Submit | 3. Verify no alert | 4. Try <img src=x onerror=alert(1)>`,
+      `No JavaScript executes | Input escaped or rejected | HTTP 400 or sanitised`,
+      'Critical'));
+  });
+
+  tests.ui.push(tc('UI-SUBMIT', `[${title}] ${label} — Valid full submission`, url,
+    `${label} submits successfully with all valid data`,
+    `${label} loaded | All fields empty`,
+    form.fields.map((f,i) => `${i+1}. Enter ${getSampleValid(f.type,f.name)} in "${f.name}"`).concat([`${form.fields.length+1}. Click submit | ${form.fields.length+2}. Verify success`]).join(' | '),
+    `Form submits | Success response | No errors | Redirect or success message`,
+    'Critical'));
+
+  tests.ui.push(tc('UI-SUBMIT', `[${title}] ${label} — Empty submission blocked`, url,
+    `${label} blocks submission with empty required fields`,
+    `${label} loaded | Fields empty`,
+    `1. Click submit without filling anything | 2. Count errors | 3. Verify form not submitted`,
+    `${form.fields.filter(f=>f.required).length} validation errors shown | Form not submitted | Focus on first error`,
+    'Critical'));
+
+  tests.security.push(tc('SEC-FORM', `[${title}] ${label} — SQL injection`, url,
+    `SQL injection prevention in ${label}`,
+    `${label} loaded`,
+    `1. Enter ' OR '1'='1 in text fields | 2. Submit | 3. Verify no SQL error | 4. Try '; DROP TABLE users-- | 5. Verify safe`,
+    `SQL errors not exposed | Input sanitised | Status 400 or normal response`,
+    'Critical'));
+}
+
+// ── Button Tests ──────────────────────────────────────────────
+function generateButtonTests(btn, title, url, tests) {
+  tests.ui.push(tc('UI-BTN', `[${title}] Button: "${btn.text}" — Click`, url,
+    `"${btn.text}" triggers expected action`,
+    `On ${url} | Button visible`,
+    `1. Locate "${btn.text}" button | 2. Verify ${btn.disabled ? 'disabled state' : 'enabled'} | 3. ${btn.disabled ? 'Verify no action on click' : 'Click button'} | 4. Verify result | 5. Test Enter/Space keyboard`,
+    `Button ${btn.disabled ? 'disabled and non-interactive' : 'triggers correct action'} | No errors | Keyboard accessible`,
+    /delete|remove|cancel|clear/i.test(btn.text) ? 'Critical' : 'High'));
+
+  tests.ui.push(tc('UI-BTN', `[${title}] Button: "${btn.text}" — Loading state`, url,
+    `"${btn.text}" shows loading state on async action`,
+    `Button visible`,
+    `1. Click "${btn.text}" | 2. Verify loading indicator appears | 3. Verify button disabled during loading | 4. Verify loading disappears on completion`,
+    `Loading state shown | Button disabled during load | Cannot double-click | Completion state correct`,
+    'Medium'));
+
+  if (/delete|remove/i.test(btn.text)) {
+    tests.ui.push(tc('UI-BTN', `[${title}] Button: "${btn.text}" — Confirmation dialog`, url,
+      `Destructive action requires confirmation`,
+      `Data exists to delete`,
+      `1. Click "${btn.text}" | 2. Verify confirmation dialog | 3. Click Cancel | 4. Verify NOT deleted | 5. Click "${btn.text}" again | 6. Confirm | 7. Verify deleted`,
+      `Confirmation required | Cancel prevents action | Confirm executes | Undo available if applicable`,
+      'Critical'));
+  }
+}
+
+// ── Select Tests ──────────────────────────────────────────────
+function generateSelectTests(sel, title, url, tests) {
+  tests.ui.push(tc('UI-SEL', `[${title}] Dropdown: "${sel.name}" — All options`, url,
+    `"${sel.name}" shows all ${sel.options.length} options`,
+    `On ${url}`,
+    `1. Click "${sel.name}" | 2. Verify opens | 3. Count options (expect ${sel.options.length}) | 4. Verify options: ${sel.options.slice(0,4).join(', ')} | 5. Select each | 6. Verify selection persists`,
+    `${sel.options.length} options shown | Each selectable | Selection persists | Keyboard navigable`,
+    sel.required ? 'Critical' : 'High'));
+
+  sel.options.slice(0, 6).forEach(opt => {
+    tests.ui.push(tc('UI-SEL', `[${title}] Dropdown: "${sel.name}" → Select "${opt}"`, url,
+      `Selecting "${opt}" from "${sel.name}" works correctly`,
+      `Dropdown visible`,
+      `1. Open "${sel.name}" | 2. Select "${opt}" | 3. Verify "${opt}" shown as selected | 4. Verify any dependent UI updates`,
+      `"${opt}" selected | Displayed in field | Dependent fields update if applicable`,
+      'High'));
+  });
+
+  if (sel.required) {
+    tests.ui.push(tc('UI-SEL', `[${title}] Dropdown: "${sel.name}" — Required validation`, url,
+      `"${sel.name}" shows error when not selected`,
+      `Form with dropdown`,
+      `1. Leave "${sel.name}" on default/empty | 2. Submit form | 3. Verify error`,
+      `Required error shown | Form not submitted`,
+      'Critical'));
+  }
+}
+
+// ── Table Tests ───────────────────────────────────────────────
+function generateTableTests(tbl, title, url, tests) {
+  tests.ui.push(tc('UI-TABLE', `[${title}] Table "${tbl.id}" — Data displays`, url,
+    `Table shows correct data with all columns`,
+    `On ${url} | Data exists`,
+    `1. Locate table | 2. Verify headers: ${tbl.headers.slice(0,4).join(', ')} | 3. Verify data rows | 4. Verify data format in cells`,
+    `Headers visible | Data rows present | Cells formatted correctly | No empty required cells`,
+    'High'));
+
+  if (tbl.headers.length > 0) {
+    tbl.headers.slice(0,5).forEach(h => {
+      tests.ui.push(tc('UI-TABLE', `[${title}] Table "${tbl.id}" — Sort by "${h}"`, url,
+        `Clicking "${h}" header sorts table`,
+        `Table visible with data`,
+        `1. Click "${h}" header | 2. Verify ascending sort | 3. Click again | 4. Verify descending | 5. Verify sort indicator`,
+        `Data sorted by ${h} | Toggle asc/desc | Arrow indicator shown`,
+        'Medium'));
+    });
+  }
+
+  tests.ui.push(tc('UI-TABLE', `[${title}] Table "${tbl.id}" — Responsive`, url,
+    `Table scrolls horizontally on mobile`,
+    `Viewport 375px`,
+    `1. Set viewport 375px | 2. View table | 3. Verify horizontal scroll | 4. Verify columns not hidden unintentionally`,
+    `Horizontal scroll appears | All data accessible | Headers remain visible`,
+    'High'));
+
+  tests.ui.push(tc('UI-TABLE', `[${title}] Table "${tbl.id}" — Empty state`, url,
+    `Table shows empty state when no data`,
+    `No data in table`,
+    `1. Remove/filter all data | 2. Verify empty state message | 3. Verify add/create button shown`,
+    `"No data" message shown | Helpful empty state | Action to add data`,
+    'Medium'));
+}
+
+// ── Navigation Tests ──────────────────────────────────────────
+function generateNavTests(links, title, url, tests) {
+  tests.ui.push(tc('UI-NAV', `[${title}] Navigation — All ${links.length} links work`, url,
+    `All navigation links functional`,
+    `Navigation visible`,
+    links.slice(0,10).map((l,i) => `${i+1}. Click "${l.text}" → verify page loads`).join(' | '),
+    `All ${links.length} links functional | Correct pages load | No 404s | Active state shown`,
+    'Critical'));
+
+  links.slice(0,12).forEach(link => {
+    tests.ui.push(tc('UI-NAVLINK', `[${title}] Nav: "${link.text}"`, url,
+      `"${link.text}" navigates correctly`,
+      `Nav visible`,
+      `1. Locate "${link.text}" | 2. Verify visible | 3. Click | 4. Verify URL | 5. Verify content matches`,
+      `Navigates to ${link.href} | Correct content | Active state`,
+      'High'));
+  });
+
+  tests.ui.push(tc('UI-NAV', `[${title}] Mobile Menu — Open/Close`, url,
+    `Hamburger menu opens and closes`,
+    `Mobile viewport 375px`,
+    `1. Set 375px viewport | 2. Locate hamburger | 3. Click | 4. Verify menu opens | 5. Click link | 6. Verify closes | 7. Press Escape | 8. Verify closes`,
+    `Menu opens/closes | Links work | Escape closes | Focus trapped | Scroll locked`,
+    'High'));
+}
+
+// ── Modal Tests ───────────────────────────────────────────────
+function generateModalTests(index, title, url, tests) {
+  ['Open and close (X button)', 'Close via Escape key', 'Close via backdrop click',
+   'Focus trap inside modal', 'Keyboard navigation', 'Scroll lock on body'].forEach(scenario => {
+    tests.ui.push(tc('UI-MODAL', `[${title}] Modal ${index} — ${scenario}`, url,
+      `Modal ${index}: ${scenario}`,
+      `Modal trigger accessible`,
+      `1. Open modal ${index} | 2. Test: ${scenario} | 3. Verify behaviour`,
+      `Modal ${scenario} works correctly | Accessible | No page behind accessible`,
+      'High'));
+  });
+}
+
+// ── File Input Tests ──────────────────────────────────────────
+function generateFileInputTests(fi, title, url, tests) {
+  [
+    ['Valid file type',    `Upload ${fi.accept || 'valid'} file | Success`,             'File accepted | Preview shown | Name displayed'],
+    ['Invalid file type',  'Upload .exe file',                                          'Error: Invalid file type | Not uploaded'],
+    ['File too large',     'Upload 20MB file',                                          'Error: File too large | Size limit shown'],
+    ['Empty submission',   'Submit without file if required',                           fi.required ? 'Required error shown' : 'Form submits without file'],
+    ['Multiple files',     fi.multiple ? 'Select 3 files' : 'Select 2 files at once',  fi.multiple ? 'All files accepted' : 'Only first file used'],
+    ['Drag and drop',      'Drag file onto drop zone',                                  'File accepted | Drop zone highlights on drag over'],
+  ].forEach(([name, steps, expected]) => {
+    tests.ui.push(tc('UI-FILE', `[${title}] Upload "${fi.name}" — ${name}`, url,
+      `File upload "${fi.name}": ${name}`,
+      `File input visible`,
+      `1. ${steps} | 2. Verify: ${expected}`,
+      expected, 'High'));
+  });
+}
+
+// ── Pagination Tests ──────────────────────────────────────────
+function generatePaginationTests(pg, title, url, tests) {
+  [
+    ['First page active on load',   'Page 1 highlighted | Prev button disabled'],
+    ['Next page loads',             'Page 2 loads | Different content | URL updates'],
+    ['Prev page from page 2',       'Returns to page 1 | Same content'],
+    ['Jump to last page',           `Page ${pg.maxPage} loads | Next disabled`],
+    ['Page number buttons',         'Clicking page 3 loads page 3 | Correct items'],
+    ['Items per page selector',     'Changing to 24/48/96 updates count'],
+    ['URL updates per page',        'URL has ?page=X | Shareable | Back works'],
+    ['Scroll to top on page change','Page scrolls to top after navigation'],
+  ].forEach(([name, expected]) => {
+    tests.ui.push(tc('UI-PAGE', `[${title}] Pagination — ${name}`, url,
+      `Pagination: ${name}`,
+      `Multiple pages of data`,
+      `1. ${name} | 2. Verify: ${expected}`,
+      expected, 'High'));
+  });
+}
+
+// ── Tab Tests ─────────────────────────────────────────────────
+function generateTabTests(tab, title, url, tests) {
+  [`Tab 1 active on load`, `Click each tab shows content`, `Keyboard: Arrow keys navigate`,
+   `Tab content lazy-loads`, `Active tab highlighted`, `URL updates on tab change`].forEach(scenario => {
+    tests.ui.push(tc('UI-TAB', `[${title}] Tabs (${tab.count}) — ${scenario}`, url,
+      `Tab component: ${scenario}`,
+      `Tab component visible`,
+      `1. ${scenario} | 2. Verify behaviour`,
+      `${scenario} works correctly`,
+      'High'));
+  });
+}
+
+// ── Input standalone tests ────────────────────────────────────
+function generateInputTests(inp, title, url, tests) {
+  const valid = getSampleValid(inp.type, inp.name);
+  tests.ui.push(tc('UI-INPUT', `[${title}] Input "${inp.name}" (${inp.type}) — Valid`, url,
+    `Input "${inp.name}" accepts valid ${inp.type}`,
+    `Input visible`,
+    `1. Click "${inp.name}" | 2. Enter "${valid}" | 3. Tab away | 4. Verify accepted`,
+    `Accepts "${valid}" | No error`,
+    'Medium'));
+}
+
+// ─────────────────────────────────────────────────────────────
+// GLOBAL TEST SETS
+// ─────────────────────────────────────────────────────────────
+
 function generateCrossPageTests(pages) {
+  if (pages.length < 2) return [];
   const tests = [];
-  if (pages.length < 2) return tests;
+  tests.push(tc('UI-FLOW', `E2E — Navigate all ${pages.length} pages`, pages[0].url,
+    `Full site navigation across all ${pages.length} pages`,
+    `App accessible`,
+    pages.slice(0,10).map((p,i) => `${i+1}. Visit "${p.title}" (${p.url})`).join(' | '),
+    `All pages accessible | No dead ends | Session persists`, 'Critical'));
 
-  tests.push({
-    id: nextId('UI-FLOW'), name: `User Journey — Browse and Navigate (${pages.length} pages)`,
-    url: pages[0].url,
-    description: `End-to-end navigation flow across all ${pages.length} discovered pages`,
-    preconditions: 'Browser open | Application accessible',
-    testSteps: pages.slice(0, 10).map((p, i) =>
-      `${i+1}. Navigate to "${p.title}" (${p.url}) | Verify loads`
-    ).join(' | '),
-    expectedResult: `All ${pages.length} pages accessible | No dead ends | Back button works everywhere | Session persists across pages`,
-    priority: 'Critical',
-  });
+  tests.push(tc('UI-FLOW', `E2E — Session persists across ${pages.length} pages`, pages[0].url,
+    `User session persists navigating all pages`,
+    `User logged in`,
+    `1. Login | 2. Navigate all pages | 3. Verify still logged in on each | 4. Hard refresh on page 5 | 5. Verify session preserved`,
+    `Session persists | Token valid | User data consistent`, 'Critical'));
 
-  tests.push({
-    id: nextId('UI-FLOW'), name: `Session Persistence Across Pages`,
-    url: pages[0].url,
-    description: 'Verify user state and session persist when navigating between pages',
-    preconditions: 'User is logged in',
-    testSteps: `1. Login | 2. Navigate to ${pages.slice(0,4).map(p=>p.title).join(' → ')} | 3. Verify still logged in on each | 4. Verify user data consistent | 5. Hard refresh on middle page | 6. Verify session preserved`,
-    expectedResult: 'Login state persists | User data consistent | No unexpected logouts | Session token valid throughout',
-    priority: 'Critical',
-  });
+  tests.push(tc('UI-FLOW', `Browser Back/Forward — ${pages.length} pages`, pages[0].url,
+    `Browser history works across all pages`,
+    `Browser history enabled`,
+    `1. Visit pages in order | 2. Press Back 5 times | 3. Press Forward 5 times | 4. Verify correct pages`,
+    `Back/forward navigate correctly | URL updates | Content correct`, 'High'));
 
-  tests.push({
-    id: nextId('UI-FLOW'), name: `Browser Back/Forward Navigation`,
-    url: pages[0].url,
-    description: 'Verify browser back/forward buttons work correctly across all pages',
-    preconditions: 'Browser history available',
-    testSteps: `1. Visit pages in order: ${pages.slice(0,5).map(p=>p.title).join(' → ')} | 2. Press Back multiple times | 3. Verify correct pages load | 4. Press Forward | 5. Verify history correct`,
-    expectedResult: 'Back/forward navigate correctly | URL updates | No infinite loops | Page state preserved where expected',
-    priority: 'High',
-  });
+  tests.push(tc('UI-FLOW', `Deep Link — All pages directly accessible`, pages[0].url,
+    `Every page URL is directly accessible`,
+    `SPA routing configured`,
+    pages.map((p,i) => `${i+1}. Navigate directly to ${p.url}`).join(' | '),
+    `All ${pages.length} pages load when accessed directly | No 404 | No blank page`, 'Critical'));
 
   return tests;
 }
 
-// ── Global security tests ─────────────────────────────────────
 function generateGlobalSecurityTests(pages) {
   const origin = pages[0] ? new URL(pages[0].url).origin : '';
-  const tests  = [];
-
-  const secTests = [
-    { name: 'HTTPS Redirect',           steps: `1. Visit HTTP version: ${origin.replace('https','http')} | 2. Verify 301/302 redirect to HTTPS`, expected: 'Automatic redirect to HTTPS | HSTS header present' },
-    { name: 'Security Headers',         steps: `1. Open ${origin} | 2. Check headers: X-Frame-Options, X-Content-Type-Options, CSP, HSTS, Referrer-Policy`, expected: 'All security headers present and correctly configured' },
-    { name: 'Cookie Security Flags',    steps: `1. Login | 2. Inspect cookies in DevTools | 3. Check Secure, HttpOnly, SameSite flags`, expected: 'All session cookies have Secure | HttpOnly | SameSite=Strict or Lax' },
-    { name: 'Content Security Policy',  steps: `1. Check CSP header | 2. Try injecting inline script | 3. Verify blocked`, expected: 'CSP header present | Inline scripts blocked | Eval blocked' },
-    { name: 'CORS Configuration',       steps: `1. Make cross-origin request to API | 2. Verify CORS headers | 3. Verify restricted origins`, expected: 'CORS restricted to allowed origins | Credentials not allowed from all origins' },
-    { name: 'Rate Limiting — Login',    steps: `1. Attempt login 20 times quickly | 2. Verify rate limit kicks in | 3. Check 429 response`, expected: 'Rate limit after 10–15 attempts | 429 Too Many Requests | Lockout period applies' },
-    { name: 'Open Redirect Prevention', steps: `1. Try ${origin}/login?redirect=https://evil.com | 2. Verify redirect is blocked or sanitised`, expected: 'Open redirect blocked | Only whitelisted domains allowed | Warning shown' },
-    { name: 'Sensitive Data Exposure',  steps: `1. Check all API responses | 2. Verify no passwords/tokens in responses | 3. Check error messages don't leak stack traces`, expected: 'No sensitive data in responses | Errors are generic | No stack traces in production' },
-    { name: 'Clickjacking Protection',  steps: `1. Check X-Frame-Options header | 2. Check CSP frame-ancestors | 3. Try embedding in iframe`, expected: 'X-Frame-Options: DENY or SAMEORIGIN | CSP frame-ancestors set | Iframe embedding blocked' },
-    { name: 'Path Traversal',           steps: `1. Try ${origin}/../../etc/passwd | 2. Try ${origin}/../../../windows/system32 | 3. Verify blocked`, expected: 'Path traversal blocked | 400 or 403 response | No file system access' },
-    { name: 'JWT Token Security',       steps: `1. Get valid JWT | 2. Modify payload | 3. Send modified token | 4. Verify rejected | 5. Use expired token | 6. Verify rejected`, expected: 'Modified token rejected | Expired token rejected | Algorithm: RS256 or HS256 | No "none" algorithm' },
-    { name: 'Password Reset Security',  steps: `1. Request password reset | 2. Check token in URL | 3. Verify token expiry (< 1 hour) | 4. Verify one-time use | 5. Try reusing token`, expected: 'Reset token expires in < 1 hour | One-time use | Secure random token | Old password not sent in email' },
-    { name: 'Insecure Direct Object Reference', steps: `1. Login as User A | 2. Note your resource ID | 3. Increment/guess other IDs | 4. Try accessing User B resources`, expected: 'Access denied to other users data | 403 Forbidden | IDs not guessable (UUIDs)' },
-    { name: 'File Upload Security',     steps: `1. Upload .php file | 2. Upload .exe file | 3. Upload file with malicious content | 4. Try path traversal in filename`, expected: 'Executable files rejected | MIME type validation | Filename sanitised | Uploads not publicly accessible' },
-    { name: 'Verbose Error Messages',   steps: `1. Trigger 404 | 2. Trigger 500 | 3. Submit invalid input | 4. Check error messages don't expose stack traces or DB info`, expected: 'Generic error messages | No stack traces | No DB query details | No server paths exposed' },
-  ];
-
-  secTests.forEach(t => {
-    tests.push({
-      id:          nextId('SEC'),
-      name:        t.name,
-      url:         origin,
-      description: `Security test: ${t.name}`,
-      preconditions: 'Access to application | Security testing tools available',
-      testSteps:   t.steps,
-      expectedResult: t.expected,
-      priority:    'Critical',
-    });
-  });
-
-  return tests;
+  return [
+    ['HTTPS Redirect',             `Visit ${origin.replace('https','http')} | Verify 301 to HTTPS | HSTS header present`],
+    ['X-Frame-Options',            `Check X-Frame-Options header | DENY or SAMEORIGIN | Clickjacking blocked`],
+    ['X-Content-Type-Options',     `Check header: X-Content-Type-Options: nosniff | Present on all responses`],
+    ['Content Security Policy',    `Check CSP header | Restrictive policy | No unsafe-inline scripts`],
+    ['HSTS Header',                `Check Strict-Transport-Security | max-age ≥ 31536000 | includeSubDomains`],
+    ['Cookie Security',            `Inspect cookies | Secure flag | HttpOnly flag | SameSite=Strict`],
+    ['CORS Configuration',         `Cross-origin request to API | Correct origins allowed | Credentials restricted`],
+    ['Rate Limiting — Login',      `Send 20 rapid login requests | Verify 429 response | Lockout period`],
+    ['Rate Limiting — API',        `Send 100 rapid API requests | Verify rate limit applied`],
+    ['SQL Injection — URL Params', `Try ${origin}?id=' OR '1'='1 | Verify safe response`],
+    ['Path Traversal',             `Try ${origin}/../../etc/passwd | Verify 400/403`],
+    ['Open Redirect',              `Try ${origin}/login?redirect=https://evil.com | Blocked`],
+    ['Verbose Errors',             `Trigger 500 error | Verify no stack trace | Generic message`],
+    ['JWT Algorithm',              `Inspect JWT | Algorithm is RS256 or HS256 | Not "none"`],
+    ['Password Brute Force',       `5 failed logins | Account locked or CAPTCHA triggered`],
+    ['Session Fixation',           `Session ID changes after login | Old session invalid`],
+    ['CSRF Tokens',                `All state-changing forms have CSRF token | Token validated`],
+    ['Sensitive Data in Logs',     `Check server logs | No passwords | No tokens | No PII`],
+    ['Dependency Vulnerabilities', `Run npm audit | 0 critical CVEs | Patch high severity`],
+    ['File Upload Security',       `Upload PHP/EXE file | Rejected | MIME type validated`],
+  ].map(([name, steps]) =>
+    tc('SEC-GLOBAL', name, origin, `Security: ${name}`, 'App accessible', steps,
+       `${name} security check passes`, 'Critical'));
 }
 
-// ── API tests based on discovered pages ──────────────────────
-function generateApiTests(pages) {
-  const tests  = [];
-  const origin = pages[0] ? new URL(pages[0].url).origin : '';
-
-  const endpoints = [
-    { m: 'GET',    p: '/api/health',            auth: false, desc: 'Health check' },
-    { m: 'POST',   p: '/api/auth/login',        auth: false, desc: 'Login' },
-    { m: 'POST',   p: '/api/auth/register',     auth: false, desc: 'Register' },
-    { m: 'POST',   p: '/api/auth/logout',       auth: true,  desc: 'Logout' },
-    { m: 'GET',    p: '/api/auth/me',           auth: true,  desc: 'Current user' },
-    { m: 'GET',    p: '/api/users',             auth: true,  desc: 'List users' },
-    { m: 'POST',   p: '/api/users',             auth: true,  desc: 'Create user' },
-    { m: 'GET',    p: '/api/users/:id',         auth: true,  desc: 'Get user by ID' },
-    { m: 'PUT',    p: '/api/users/:id',         auth: true,  desc: 'Update user' },
-    { m: 'DELETE', p: '/api/users/:id',         auth: true,  desc: 'Delete user' },
-    { m: 'GET',    p: '/api/products',          auth: false, desc: 'List products' },
-    { m: 'POST',   p: '/api/products',          auth: true,  desc: 'Create product' },
-    { m: 'GET',    p: '/api/products/:id',      auth: false, desc: 'Get product' },
-    { m: 'PUT',    p: '/api/products/:id',      auth: true,  desc: 'Update product' },
-    { m: 'DELETE', p: '/api/products/:id',      auth: true,  desc: 'Delete product' },
-    { m: 'GET',    p: '/api/orders',            auth: true,  desc: 'List orders' },
-    { m: 'POST',   p: '/api/orders',            auth: true,  desc: 'Create order' },
-    { m: 'GET',    p: '/api/orders/:id',        auth: true,  desc: 'Get order' },
-    { m: 'PATCH',  p: '/api/orders/:id/status', auth: true, desc: 'Update order status' },
-    { m: 'GET',    p: '/api/settings',          auth: true,  desc: 'Get settings' },
-    { m: 'PUT',    p: '/api/settings',          auth: true,  desc: 'Update settings' },
-    { m: 'POST',   p: '/api/upload',            auth: true,  desc: 'File upload' },
-    { m: 'GET',    p: '/api/search',            auth: false, desc: 'Search' },
-    { m: 'GET',    p: '/api/categories',        auth: false, desc: 'Categories' },
-    { m: 'POST',   p: '/api/contact',           auth: false, desc: 'Contact form' },
-  ];
-
-  endpoints.forEach(ep => {
-    // Happy path
-    tests.push({
-      id:          nextId('API'),
-      name:        `${ep.m} ${ep.p} — ${ep.desc}`,
-      method:      ep.m,
-      endpoint:    `${origin}${ep.p}`,
-      description: `${ep.desc} endpoint: ${ep.m} ${ep.p}`,
-      preconditions: ep.auth ? 'Valid JWT token required' : 'No auth required',
-      testSteps:   `1. Send ${ep.m} to ${ep.p} | 2. ${ep.auth ? 'Include Bearer token' : 'No auth header'} | 3. Verify status | 4. Validate response schema | 5. Check response time < 2s`,
-      expectedResult: `HTTP ${ep.m === 'POST' ? '201' : ep.m === 'DELETE' ? '204' : '200'} | Valid JSON | < 2s response | ${ep.auth ? 'Returns 401 without token' : 'Publicly accessible'}`,
-      priority: ep.p.includes('auth') ? 'Critical' : 'High',
-    });
-
-    // Auth test for protected endpoints
-    if (ep.auth) {
-      tests.push({
-        id:          nextId('API'),
-        name:        `${ep.m} ${ep.p} — Unauthorised (no token)`,
-        method:      ep.m,
-        endpoint:    `${origin}${ep.p}`,
-        description: `Verify ${ep.p} returns 401 without auth`,
-        preconditions: 'No JWT token',
-        testSteps:   `1. Send ${ep.m} to ${ep.p} | 2. No Authorization header | 3. Verify 401`,
-        expectedResult: `HTTP 401 | {"error": "No token provided"} | No data returned`,
-        priority: 'Critical',
-      });
-    }
-
-    // Invalid data test
-    if (['POST','PUT','PATCH'].includes(ep.m)) {
-      tests.push({
-        id:          nextId('API'),
-        name:        `${ep.m} ${ep.p} — Invalid Payload`,
-        method:      ep.m,
-        endpoint:    `${origin}${ep.p}`,
-        description: `Verify ${ep.p} returns 400 with invalid data`,
-        preconditions: ep.auth ? 'Valid JWT token' : 'No auth needed',
-        testSteps:   `1. Send ${ep.m} to ${ep.p} | 2. Body: {} (empty) | 3. Verify 400 | 4. Send malformed JSON | 5. Verify 400`,
-        testData:    '{}  |  {"invalid": true}  |  malformed json',
-        expectedResult: `HTTP 400 | Descriptive error message | Field-level errors listed | No 500 errors`,
-        priority: 'High',
-      });
-    }
-  });
-
-  return tests;
-}
-
-// ── Global performance tests ──────────────────────────────────
 function generateGlobalPerfTests(pages) {
   return [
-    { name: 'Homepage Load — 1 user',          users: 1,   metric: '< 3s',    priority: 'Critical' },
-    { name: 'Concurrent Users — 10',           users: 10,  metric: '< 5s avg', priority: 'High' },
-    { name: 'Concurrent Users — 50',           users: 50,  metric: '< 8s avg', priority: 'High' },
-    { name: 'Concurrent Users — 100',          users: 100, metric: '< 15s',   priority: 'High' },
-    { name: 'Concurrent Users — 500 (stress)', users: 500, metric: 'No crash', priority: 'Medium' },
-    { name: 'API Response — GET endpoints',    users: 1,   metric: '< 200ms', priority: 'High' },
-    { name: 'API Response — POST endpoints',   users: 1,   metric: '< 500ms', priority: 'High' },
-    { name: 'API Response — under load (50)',  users: 50,  metric: '< 2s',    priority: 'High' },
-    { name: 'Time to First Byte (TTFB)',        users: 1,   metric: '< 600ms', priority: 'High' },
-    { name: 'Largest Contentful Paint (LCP)',   users: 1,   metric: '< 2.5s',  priority: 'High' },
-    { name: 'First Input Delay (FID)',          users: 1,   metric: '< 100ms', priority: 'High' },
-    { name: 'Cumulative Layout Shift (CLS)',    users: 1,   metric: '< 0.1',   priority: 'High' },
-    { name: 'Database Query Time',             users: 1,   metric: '< 100ms', priority: 'High' },
-    { name: 'Memory Leak — long session (1hr)',users: 5,   metric: '< 512MB', priority: 'Medium' },
-    { name: 'Static Asset Caching',            users: 1,   metric: 'Cache-Control set', priority: 'Medium' },
-    ...pages.slice(0, 10).map(p => ({
-      name: `${p.title} — Page Load`,
-      users: 1, metric: '< 3s', priority: 'High',
-    })),
-  ].map(t => ({
-    id:          nextId('PERF'),
-    name:        t.name,
-    users:       t.users,
-    requests:    t.users * 10,
-    description: `Performance: ${t.name} | Target: ${t.metric}`,
-    preconditions: 'Load testing tool configured (k6, JMeter, or Lighthouse)',
-    testSteps:   `1. Configure ${t.users} virtual user(s) | 2. Run for 60 seconds | 3. Measure ${t.name} | 4. Compare to threshold: ${t.metric}`,
-    expectedResult: `${t.name} meets: ${t.metric} | No 5xx errors | No timeouts`,
-    priority:    t.priority,
-  }));
+    ['Homepage LCP < 2.5s',              1,  'LCP < 2.5s'],
+    ['Homepage FID < 100ms',             1,  'FID < 100ms'],
+    ['Homepage CLS < 0.1',               1,  'CLS < 0.1'],
+    ['TTFB < 600ms',                     1,  'TTFB < 600ms'],
+    ['Lighthouse Performance ≥80',       1,  'Score ≥ 80'],
+    ['10 concurrent users',              10, 'Avg response < 3s'],
+    ['50 concurrent users',              50, 'Avg response < 5s'],
+    ['100 concurrent users',            100, 'Avg response < 8s'],
+    ['500 concurrent users (stress)',   500, 'No crash | Graceful degradation'],
+    ['API GET < 200ms',                   1, 'Response < 200ms'],
+    ['API POST < 500ms',                  1, 'Response < 500ms'],
+    ['DB query < 100ms',                  1, 'Query < 100ms'],
+    ['JS bundle < 500KB',                 1, 'Bundle gzipped < 500KB'],
+    ['CSS < 100KB',                       1, 'CSS gzipped < 100KB'],
+    ['Images WebP/AVIF format',           1, 'Modern image format used'],
+    ['Static assets cached',              1, 'Cache-Control: immutable on /static/'],
+    ['Memory leak — 1 hour session',      5, 'Memory < 512MB after 1hr'],
+    ...pages.slice(0,8).map(p => [`${p.title} loads < 3s`, 1, 'Load < 3s']),
+  ].map(([name, users, metric]) =>
+    tc('PERF', typeof name === 'string' ? `Perf — ${name}` : `Perf — ${name[0]}`,
+       pages[0]?.url || '', `Performance: ${metric}`,
+       'Performance tools available',
+       `1. Configure ${users} virtual user(s) | 2. Measure: ${name} | 3. Compare to: ${metric}`,
+       `${name} meets threshold: ${metric}`, 'High'));
 }
 
-// ── Database tests ────────────────────────────────────────────
+function generateApiTests(pages) {
+  const origin = pages[0] ? new URL(pages[0].url).origin : '';
+  const eps = [
+    ['GET',    '/api/health',              false, '200 | {status:"ok"}'],
+    ['POST',   '/api/auth/login',          false, '200 | token in response'],
+    ['POST',   '/api/auth/signup',         false, '201 | user created'],
+    ['POST',   '/api/auth/logout',         true,  '200 | session cleared'],
+    ['GET',    '/api/auth/me',             true,  '200 | user object'],
+    ['GET',    '/api/users',               true,  '200 | array of users'],
+    ['POST',   '/api/users',               true,  '201 | user created'],
+    ['GET',    '/api/users/:id',           true,  '200 | user object'],
+    ['PUT',    '/api/users/:id',           true,  '200 | updated user'],
+    ['DELETE', '/api/users/:id',           true,  '200 or 204'],
+    ['GET',    '/api/products',            false, '200 | array of products'],
+    ['POST',   '/api/products',            true,  '201 | product created'],
+    ['GET',    '/api/products/:id',        false, '200 | product object'],
+    ['PUT',    '/api/products/:id',        true,  '200 | updated product'],
+    ['DELETE', '/api/products/:id',        true,  '200 or 204'],
+    ['GET',    '/api/orders',              true,  '200 | array of orders'],
+    ['POST',   '/api/orders',              true,  '201 | order created'],
+    ['GET',    '/api/orders/:id',          true,  '200 | order object'],
+    ['PATCH',  '/api/orders/:id/status',   true,  '200 | updated status'],
+    ['GET',    '/api/settings',            true,  '200 | settings object'],
+    ['PUT',    '/api/settings',            true,  '200 | settings updated'],
+    ['POST',   '/api/upload',             true,   '200 | file URL returned'],
+    ['GET',    '/api/search?q=test',       false, '200 | results array'],
+    ['GET',    '/api/categories',          false, '200 | categories array'],
+    ['POST',   '/api/contact',             false, '200 | message sent'],
+    ['GET',    '/api/notifications',       true,  '200 | notifications array'],
+    ['PATCH',  '/api/notifications/:id',   true,  '200 | marked as read'],
+    ['POST',   '/api/payments/charge',     true,  '200 | payment confirmed'],
+    ['GET',    '/api/payments/history',    true,  '200 | payment history'],
+    ['DELETE', '/api/account',             true,  '200 | account deleted'],
+  ];
+
+  const tests = [];
+  eps.forEach(([method, path, auth, expected]) => {
+    tests.push(tc('API', `${method} ${path}`, `${origin}${path}`,
+      `Test ${method} ${path}`,
+      auth ? 'Valid JWT token' : 'No auth needed',
+      `1. Send ${method} to ${origin}${path} | 2. ${auth ? 'Include Bearer token' : 'No auth'} | 3. Verify status | 4. Validate response schema | 5. Check time < 2s`,
+      expected, path.includes('auth') || path.includes('payment') ? 'Critical' : 'High'));
+
+    if (auth) {
+      tests.push(tc('API', `${method} ${path} — Unauthorised (401)`, `${origin}${path}`,
+        `Verify 401 without token`,
+        'No JWT token',
+        `1. Send ${method} to ${path} | 2. No Authorization header | 3. Verify 401`,
+        `HTTP 401 | Error message | No data returned`, 'Critical'));
+    }
+
+    if (['POST','PUT','PATCH'].includes(method)) {
+      tests.push(tc('API', `${method} ${path} — Invalid payload (400)`, `${origin}${path}`,
+        `Verify 400 with empty body`,
+        auth ? 'Valid JWT' : 'No auth',
+        `1. Send ${method} to ${path} | 2. Body: {} | 3. Verify 400 | 4. Check error message`,
+        `HTTP 400 | Descriptive error | No 500`, 'High'));
+    }
+  });
+  return tests;
+}
+
 function generateDatabaseTests() {
   return [
-    ['Connection Pool Health',        'SELECT 1',                          'Pool returns healthy connection in < 50ms'],
-    ['Read — Users Table',            'SELECT COUNT(*) FROM users',         'Returns count in < 100ms'],
-    ['Write — Insert User',           'INSERT INTO users ... RETURNING id', 'UUID generated, row inserted'],
-    ['Update — User Fields',          'UPDATE users SET ... WHERE id=$1',   'Row updated, updated_at trigger fires'],
-    ['Delete — Soft Delete',          'UPDATE users SET is_active=false',   'Soft delete works, row not removed'],
-    ['Index — Email Lookup',          'SELECT * FROM users WHERE email=$1', 'Uses idx_users_email, < 10ms'],
-    ['Index — Project Tests',         'SELECT * FROM test_cases WHERE project_id=$1', 'Uses idx_test_cases_project'],
-    ['Foreign Key — Project Cascade', 'DELETE FROM projects WHERE id=$1',   'Cascade deletes related test_cases'],
-    ['Transaction — Rollback',        'BEGIN; error; ROLLBACK',             'Transaction rolled back cleanly'],
-    ['Transaction — Commit',          'BEGIN; INSERT; COMMIT',              'Transaction commits, data persists'],
-    ['JSONB — test_steps field',      'SELECT test_steps FROM test_cases',  'JSONB field readable and parseable'],
-    ['UUID Generation',               'SELECT uuid_generate_v4()',          'Valid UUID returned'],
-    ['Trigger — updated_at',          'UPDATE users SET email=$1',          'updated_at column auto-updates'],
-    ['Concurrent Writes',             '50 simultaneous INSERTs',            'No deadlocks, all rows inserted'],
-    ['Connection Limit',              '100 simultaneous connections',       'Pool handles max connections gracefully'],
-    ['Large Result Set',              'SELECT * FROM test_cases LIMIT 1000','Returns in < 500ms with correct count'],
-    ['Aggregate Query',               'SELECT type, COUNT(*) FROM test_cases GROUP BY type', 'Grouped results correct'],
-    ['Full-text Search',              "SELECT * FROM test_cases WHERE summary ILIKE '%test%'", 'Returns relevant results'],
-  ].map(([name, q, expected]) => ({
-    id:          nextId('DB'),
-    name,
-    query:       q,
-    database:    'neon-postgres',
-    description: `Database test: ${name}`,
-    preconditions: 'Database running | Connection string valid',
-    testSteps:   `1. Connect to Neon DB | 2. Execute: ${q} | 3. Measure execution time | 4. Verify result`,
-    expectedResult: expected,
-    priority:    name.includes('Connection') || name.includes('Transaction') ? 'Critical' : 'High',
-  }));
+    ['Connection pool health',           'SELECT 1',                          'Healthy connection < 50ms'],
+    ['Users table — read',               'SELECT COUNT(*) FROM users',        'Returns count < 100ms'],
+    ['Users table — write',              'INSERT INTO users RETURNING user_id','UUID returned | Row inserted'],
+    ['Users table — update',             'UPDATE users SET full_name=$1',     'Row updated | updated_at trigger fires'],
+    ['Users table — soft delete',        'UPDATE users SET is_active=false',  'Row soft-deleted | Not hard deleted'],
+    ['Email index performance',          'SELECT * FROM users WHERE email=$1', 'Uses index | < 10ms'],
+    ['Projects table CRUD',              'INSERT/SELECT/UPDATE/DELETE projects','All operations < 100ms'],
+    ['Test cases — bulk insert',         'INSERT 100 rows into test_cases',   'All 100 inserted < 2s'],
+    ['Test cases — filter by project',   'SELECT ... WHERE project_id=$1',    'Uses index | Correct results'],
+    ['Test executions — write',          'INSERT INTO test_executions',        'Execution recorded correctly'],
+    ['Bug reports — create',             'INSERT INTO bug_reports',            'Bug key unique | Created correctly'],
+    ['Foreign key constraint',           'INSERT with invalid UUID FK',        'FK constraint violated | Error returned'],
+    ['Transaction — commit',             'BEGIN; INSERT; COMMIT',              'Data persisted | Transaction clean'],
+    ['Transaction — rollback',           'BEGIN; error; ROLLBACK',             'No data committed | Clean rollback'],
+    ['UUID generation',                  'SELECT uuid_generate_v4()',          'Valid UUID v4 returned'],
+    ['JSONB field read/write',           'INSERT/SELECT test_steps JSONB',     'JSONB stored and retrieved correctly'],
+    ['updated_at trigger',               'UPDATE any row',                     'updated_at automatically set to NOW()'],
+    ['Concurrent writes (10 parallel)',  '10 simultaneous INSERTs',            'No deadlocks | All rows inserted'],
+    ['Large result set',                 'SELECT 1000 test_cases',             'Returns in < 500ms | Pagination works'],
+    ['Full text search',                 "SELECT WHERE summary ILIKE '%test%'", 'Relevant results | Acceptable performance'],
+  ].map(([name, q, expected]) =>
+    tc('DB', name, '', `Database: ${name}`, 'Neon DB accessible',
+      `1. Connect to DB | 2. Execute: ${q} | 3. Measure time | 4. Verify: ${expected}`,
+      expected, name.includes('pool') || name.includes('constraint') ? 'Critical' : 'High'));
 }
 
-// ── Unit tests ────────────────────────────────────────────────
 function generateUnitTests() {
   return [
-    ['Email Validation — valid',        'validateEmail("test@example.com")',        'Returns true'],
-    ['Email Validation — invalid',      'validateEmail("not-an-email")',            'Returns false'],
-    ['Email Validation — empty',        'validateEmail("")',                        'Returns false'],
-    ['Password Strength — strong',      'checkPassword("Abc123!@#")',               'Returns "strong"'],
-    ['Password Strength — weak',        'checkPassword("abc")',                     'Returns "weak"'],
-    ['Password Hash — generates',       'hashPassword("secret")',                   'Returns bcrypt hash starting with $2'],
-    ['Password Hash — verifies',        'comparePassword("secret", hash)',          'Returns true for matching'],
-    ['Password Hash — rejects',         'comparePassword("wrong", hash)',           'Returns false for wrong'],
-    ['JWT Sign — generates token',      'signToken({userId: "abc", plan: "free"})', 'Returns valid JWT string'],
-    ['JWT Verify — valid token',        'verifyToken(validJwt)',                    'Returns decoded payload'],
-    ['JWT Verify — expired token',      'verifyToken(expiredJwt)',                  'Throws TokenExpiredError'],
-    ['JWT Verify — tampered token',     'verifyToken(tamperedJwt)',                 'Throws JsonWebTokenError'],
-    ['URL Validation — valid',          'validateUrl("https://example.com")',       'Returns true'],
-    ['URL Validation — invalid',        'validateUrl("not a url")',                 'Returns false'],
-    ['Input Sanitiser — XSS',          'sanitize("<script>alert(1)</script>")',     'Returns escaped string'],
-    ['Input Sanitiser — SQL',          "sanitize(\"' OR '1'='1\")",               'Returns escaped string'],
-    ['Pagination — page 1',             'paginate(100, 1, 10)',                     '{page:1, total:100, pages:10, offset:0}'],
-    ['Pagination — last page',          'paginate(100, 10, 10)',                    '{page:10, total:100, offset:90}'],
-    ['Pagination — over limit',         'paginate(100, 99, 10)',                    'Returns last valid page'],
-    ['Date Formatter — ISO',            'formatDate(new Date("2024-01-15"))',       'Returns "2024-01-15"'],
-    ['Currency Formatter',              'formatCurrency(2900, "USD")',              'Returns "$29.00"'],
-    ['Slug Generator',                  'toSlug("Hello World 123")',                'Returns "hello-world-123"'],
-    ['Rate Limiter — allows',           'rateLimit("ip:1", 15, 60000)',             'Returns false (not limited)'],
-    ['Rate Limiter — blocks',           '16 calls to rateLimit("ip:2", 15, 60000)','Returns true on 16th call'],
-    ['Error Handler — 400',             'errorHandler(ValidationError, req, res)',  'Sends status 400 with message'],
-    ['Error Handler — 500',             'errorHandler(Error, req, res)',            'Sends status 500, no stack in prod'],
-    ['Auth Middleware — valid JWT',     'authMiddleware with valid token',           'Calls next(), req.user set'],
-    ['Auth Middleware — no token',      'authMiddleware with no Authorization',      'Returns 401'],
-    ['Auth Middleware — bad token',     'authMiddleware with invalid JWT',           'Returns 401'],
-    ['CORS — allowed origin',           'setCors(req with allowed origin)',          'Sets CORS headers'],
-    ['CORS — blocked origin',           'setCors(req with blocked origin)',          'No CORS headers set'],
-  ].map(([name, code, expected]) => ({
-    id:          nextId('UNIT'),
-    name,
-    code,
-    description: `Unit test: ${name}`,
-    preconditions: 'Test environment | Jest installed',
-    testSteps:   `1. Import function | 2. Execute: ${code} | 3. Assert: ${expected}`,
-    expectedResult: expected,
-    priority:    name.includes('Password') || name.includes('JWT') || name.includes('SQL') ? 'Critical' : 'High',
-  }));
+    ['validateEmail valid',              'validateEmail("user@test.com")',               'Returns true'],
+    ['validateEmail invalid',            'validateEmail("notanemail")',                  'Returns false'],
+    ['validateEmail empty',              'validateEmail("")',                            'Returns false'],
+    ['validateEmail SQL inject',         "validateEmail(\"' OR 1=1\")",                 'Returns false'],
+    ['validateUrl valid',                'validateUrl("https://example.com")',           'Returns true'],
+    ['validateUrl invalid',              'validateUrl("not a url")',                     'Returns false'],
+    ['validateUrl no protocol',          'validateUrl("example.com")',                   'Returns false'],
+    ['hashPassword generates',           'hashPassword("pass")',                         'Returns bcrypt string starting $2'],
+    ['hashPassword unique salts',        'hashPassword("pass") twice',                  'Returns different hashes'],
+    ['comparePassword match',            'comparePassword("pass", hash)',               'Returns true'],
+    ['comparePassword no match',         'comparePassword("wrong", hash)',              'Returns false'],
+    ['signToken generates',              'signToken({userId:"1"})',                      'Returns valid JWT string'],
+    ['verifyToken valid',                'verifyToken(validJwt)',                        'Returns payload'],
+    ['verifyToken expired',              'verifyToken(expiredJwt)',                      'Throws TokenExpiredError'],
+    ['verifyToken tampered',             'verifyToken(tamperedJwt)',                     'Throws JsonWebTokenError'],
+    ['verifyToken wrong secret',         'verifyToken(jwt, wrongSecret)',               'Throws error'],
+    ['sanitizeInput removes script',     'sanitize("<script>alert(1)</script>")',        'Returns escaped string'],
+    ['sanitizeInput removes img xss',    'sanitize("<img src=x onerror=alert(1)>")',     'Returns escaped string'],
+    ["sanitizeInput SQL",                "sanitize(\"' OR '1'='1\")",                   'Returns escaped string'],
+    ['paginate page 1',                  'paginate(100,1,10)',                           '{page:1,pages:10,offset:0}'],
+    ['paginate last page',               'paginate(100,10,10)',                          '{page:10,offset:90}'],
+    ['paginate beyond last',             'paginate(100,99,10)',                          'Returns last valid page'],
+    ['paginate zero items',              'paginate(0,1,10)',                             '{pages:0,total:0}'],
+    ['formatCurrency USD',               'formatCurrency(2900,"USD")',                   '"$29.00"'],
+    ['formatCurrency EUR',               'formatCurrency(1000,"EUR")',                   '"€10.00"'],
+    ['formatDate ISO',                   'formatDate(new Date("2024-01-15"))',            '"2024-01-15"'],
+    ['rateLimit allows',                 'rateLimit("ip",15,60000) × 15',               'Returns false all 15 times'],
+    ['rateLimit blocks',                 'rateLimit("ip",15,60000) × 16',               'Returns true on 16th'],
+    ['rateLimit resets',                 'Wait for window | rateLimit again',            'Allows again after window'],
+    ['errorHandler 400',                 'errorHandler(ValidationError,req,res)',        'Sends 400 with message'],
+    ['errorHandler 500',                 'errorHandler(Error,req,res)',                  'Sends 500 | No stack trace in prod'],
+  ].map(([name, code, expected]) =>
+    tc('UNIT', name, '', `Unit: ${name}`, 'Jest test environment',
+      `1. Import function | 2. Execute: ${code} | 3. Assert: ${expected}`,
+      expected, name.includes('SQL') || name.includes('JWT') || name.includes('hash') ? 'Critical' : 'High'));
 }
 
-// ── Helper: sample valid values by field type ─────────────────
-function getSampleValidValue(type, name = '') {
+// ── Helper: create a test case object ────────────────────────
+function tc(prefix, name, url, description, preconditions, testSteps, expectedResult, priority) {
+  return {
+    id: nextId(prefix),
+    name,
+    url: url || '',
+    description,
+    preconditions,
+    testSteps,
+    expectedResult,
+    priority,
+  };
+}
+
+// ── Sample values ─────────────────────────────────────────────
+function getSampleValid(type, name='') {
   const n = name.toLowerCase();
-  if (n.includes('email'))   return 'test@example.com';
-  if (n.includes('phone'))   return '+1-555-123-4567';
+  if (n.includes('email'))                  return 'user@example.com';
+  if (n.includes('phone') || n.includes('tel')) return '+1-555-123-4567';
   if (n.includes('zip') || n.includes('postal')) return '12345';
-  if (n.includes('url'))     return 'https://example.com';
-  if (n.includes('date'))    return '2024-06-15';
+  if (n.includes('url') || n.includes('website')) return 'https://example.com';
+  if (n.includes('date'))                   return '2024-06-15';
   if (n.includes('price') || n.includes('amount')) return '29.99';
-  if (n.includes('age'))     return '25';
-  switch (type) {
+  if (n.includes('card'))                   return '4242424242424242';
+  if (n.includes('cvv') || n.includes('cvc')) return '123';
+  if (n.includes('name') || n.includes('full')) return 'John Smith';
+  if (n.includes('password') || n.includes('pass')) return 'SecurePass123!';
+  if (n.includes('message') || n.includes('bio')) return 'This is a sample message with sufficient content for validation.';
+  if (n.includes('address'))               return '123 Main Street, Apt 4B';
+  if (n.includes('city'))                  return 'New York';
+  if (n.includes('subject'))               return 'Test Subject Line';
+  switch(type) {
     case 'email':    return 'user@example.com';
     case 'password': return 'SecurePass123!';
     case 'tel':      return '+1-555-987-6543';
@@ -838,20 +1413,18 @@ function getSampleValidValue(type, name = '') {
     case 'url':      return 'https://example.com';
     case 'date':     return '2024-06-15';
     case 'time':     return '14:30';
-    case 'color':    return '#3b82f6';
-    case 'range':    return '50';
-    case 'textarea': return 'This is a sample text with enough content to pass minimum length requirements.';
-    default:         return 'Sample valid text input';
+    case 'search':   return 'test query';
+    case 'textarea': return 'This is a detailed text with enough content to pass minimum length requirements.';
+    default:         return 'Sample valid text';
   }
 }
 
-// ── Helper: sample invalid values by field type ───────────────
-function getSampleInvalidValue(type) {
-  switch (type) {
-    case 'email':    return 'not-an-email';
+function getSampleInvalid(type) {
+  switch(type) {
+    case 'email':    return 'notanemail';
     case 'password': return 'abc';
     case 'tel':      return 'not-a-phone';
-    case 'number':   return 'abc';
+    case 'number':   return 'abcdef';
     case 'url':      return 'not a url';
     case 'date':     return '99/99/9999';
     default:         return null;
