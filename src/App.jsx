@@ -31,6 +31,7 @@ import PaymentModal from './components/modals/PaymentModal';
 import AnalyzeModal from './components/modals/AnalyzeModal';
 import ReportsPage  from './pages/ReportsPage';
 import LandingPage  from './pages/LandingPage';
+import AppShell     from './pages/AppShell';
 
 // ─────────────────────────────────────────────────────────────
 // ROOT APP
@@ -330,86 +331,41 @@ export default function App() {
         />
       )}
 
-      {/* ── MAIN APP ── */}
+      {/* ── MAIN APP (AppShell) ── */}
       {currentView === 'main' && (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4 md:p-6 font-sans">
-        <div className="max-w-7xl mx-auto space-y-4">
-
-          {/* ── TOP BANNER AD (free users only) ── */}
-          {showAds && <GoogleAdUnit slot="headerBanner" format="horizontal" className="rounded-xl overflow-hidden" />}
-
-          {/* ── FREE PLAN UPGRADE NUDGE ── */}
-          {isAuthenticated && userPlan === 'free' && (
-            <FreePlanBanner freeRunsLeft={freeRunsLeft} onUpgrade={() => setModal('upgrade')} />
-          )}
-
-          {/* ── HEADER ── */}
-          <Header
-            isAuthenticated={isAuthenticated}
-            userProfile={userProfile}
-            userPlan={userPlan}
-            totalTests={totalTests}
-            isRunning={isRunning}
-            canRun={canRun()}
-            onLogin={() => { setAuthMode('login'); setModal('auth'); }}
-            onLogout={handleLogout}
-            onUpgrade={() => setModal('upgrade')}
-            onAnalyze={() => guardedAction(() => setModal('analyze'))}
-            onImport={() => setModal('import')}
-            onJiraImport={() => { setJiraAction('import'); setModal('jira'); }}
-            onJiraExport={() => { setJiraAction('export'); setModal('jira'); }}
-            onExport={handleExport}
-            onReports={() => setCurrentView('reports')}
-            onRun={() => guardedAction(handleRunTests)}
-          />
-
-          {/* ── RESULTS SUMMARY ── */}
-          {results.length > 0 && <ResultsSummary summary={summary} />}
-
-          {/* ── RUNNING INDICATOR ── */}
-          {isRunning && currentTest && <RunningBadge test={currentTest} />}
-
-          {/* ── MAIN GRID ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-            {/* Left: test list (2 cols) */}
-            <div className="lg:col-span-2 space-y-4">
-              <TestPanel
-                tests={tests}
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-                onAdd={addTest}
-                onDelete={deleteTest}
-                onAnalyze={() => guardedAction(() => setModal('analyze'))}
-              />
-
-              {/* In-feed ad between panels */}
-              {showAds && (
-                <GoogleAdUnit slot="inFeed" format="horizontal" className="rounded-xl overflow-hidden" />
-              )}
-            </div>
-
-            {/* Right: results + sidebar ads */}
-            <div className="space-y-4">
-              {showAds && <GoogleAdUnit slot="sidebarTop" format="rectangle" className="mx-auto rounded-xl overflow-hidden" />}
-
-              <ResultsPanel
-                results={results}
-                isRunning={isRunning}
-                onReportBug={r => { setSelectedFailedTest(r); setModal('bug'); }}
-                onRetest={handleRetest}
-                onDownloadScreenshot={(sc, name) => reportingService.downloadScreenshot(sc, name)}
-              />
-
-              {showAds && <GoogleAdUnit slot="sidebarBottom" format="rectangle" className="mx-auto rounded-xl overflow-hidden" />}
-            </div>
-          </div>
-
-          {/* ── BUGS DASHBOARD ── */}
-          {bugs.length > 0 && <BugsDashboard bugs={bugs} />}
-
-        </div>
-        </div>
+        <AppShell
+          userProfile={userProfile}
+          userPlan={userPlan}
+          freeRunsLeft={freeRunsLeft}
+          isAuthenticated={isAuthenticated}
+          onLogout={handleLogout}
+          onUpgrade={() => setModal('upgrade')}
+          onReports={() => setCurrentView('reports')}
+          tests={tests}
+          results={results}
+          bugs={bugs}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onAdd={addTest}
+          onDelete={deleteTest}
+          onRun={() => guardedAction(handleRunTests)}
+          onReportBug={r => { setSelectedFailedTest(r); setModal('bug'); }}
+          onRetest={handleRetest}
+          isRunning={isRunning}
+          currentTest={currentTest}
+          totalTests={totalTests}
+          summary={summary}
+          canRun={canRun()}
+          onAnalyze={(params) => guardedAction(() => handleAnalyze(params))}
+          isGenerating={isGenerating}
+          progress={analysisProgress}
+          progressMsg={analysisMsg}
+          onExport={handleExport}
+          onJiraImport={() => { setJiraAction('import'); setModal('jira'); }}
+          onJiraExport={() => { setJiraAction('export'); setModal('jira'); }}
+          onImport={() => setModal('import')}
+          showAds={showAds}
+        />
       )}
 
       {/* ══ MODALS — rendered outside page divs so z-index works ══ */}
