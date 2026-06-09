@@ -30,6 +30,7 @@ import AuthModal    from './components/modals/AuthModal';
 import PaymentModal from './components/modals/PaymentModal';
 import AnalyzeModal from './components/modals/AnalyzeModal';
 import ReportsPage  from './pages/ReportsPage';
+import LandingPage  from './pages/LandingPage';
 
 // ─────────────────────────────────────────────────────────────
 // ROOT APP
@@ -73,7 +74,15 @@ export default function App() {
   const showAds = PLANS[userPlan]?.showAds ?? true;
 
   // ── Page view ────────────────────────────────────────────
-  const [currentView, setCurrentView] = useState('main');
+  // 'landing' | 'main' | 'reports'
+  const [currentView, setCurrentView] = useState(
+    isAuthenticated ? 'main' : 'landing'
+  );
+
+  // Show landing when logged out, main when logged in
+  useEffect(() => {
+    if (isAuthenticated && currentView === 'landing') setCurrentView('main');
+  }, [isAuthenticated]);
 
   // ── Helpers ───────────────────────────────────────────────
   const addTest = useCallback((type, testData) => {
@@ -129,6 +138,7 @@ export default function App() {
     setUserProfile(null);
     setUserPlan('free');
     setFreeRunsLeft(PLANS.free.testRunsPerMonth);
+    setCurrentView('landing');
   };
 
   const handleUpgradePlan = (planId) => {
@@ -289,6 +299,24 @@ export default function App() {
     <>
       {/* Inject AdSense script once */}
       <AdSenseScript />
+
+      {/* ── LANDING PAGE ── */}
+      {currentView === 'landing' && (
+        <LandingPage
+          onEnterApp={() => {
+            if (isAuthenticated) {
+              setCurrentView('main');
+            } else {
+              setAuthMode('signup');
+              setModal('auth');
+            }
+          }}
+          onLogin={() => {
+            setAuthMode('login');
+            setModal('auth');
+          }}
+        />
+      )}
 
       {/* ── REPORTS PAGE (full screen) ── */}
       {currentView === 'reports' && (
