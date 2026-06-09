@@ -11,20 +11,20 @@
       "headers": [
         { "key": "X-Content-Type-Options",  "value": "nosniff" },
         { "key": "X-Frame-Options",         "value": "DENY" },
-        { "key": "X-XSS-Protection",        "value": "1; mode=block" },
-        { "key": "Referrer-Policy",         "value": "strict-origin-when-cross-origin" },
-        { "key": "Cache-Control",           "value": "no-store, no-cache, must-revalidate" }
+        { "key": "Cache-Control",           "value": "no-store" }
       ]
     }
   ],
   "functions": {
-    "api/health.js":                    { "maxDuration": 10  },
-    "api/v1/auth/[action].js":         { "maxDuration": 30  },
-    "api/v1/bugs/[action].js":         { "maxDuration": 30  },
-    "api/v1/integrations/[action].js": { "maxDuration": 30  },
-    "api/v1/projects/index.js":        { "maxDuration": 30  },
-    "api/v1/reporting/[action].js":    { "maxDuration": 30  },
-    "api/v1/payments/create-intent.js":{ "maxDuration": 30  },
-    "api/v1/engine/[action].js":       { "maxDuration": 300 }
+    "api/health.js":                         { "maxDuration": 10  },
+    "api/v1/auth/[action].js":               { "maxDuration": 30  },
+    "api/v1/bugs/[action].js":               { "maxDuration": 30  },
+    "api/v1/integrations/[action].js":       { "maxDuration": 30  },
+    "api/v1/projects/index.js":              { "maxDuration": 30  },
+    "api/v1/reporting/[action].js":          { "maxDuration": 30  },
+    "api/v1/payments/create-intent.js":      { "maxDuration": 30  },
+    "api/v1/sources/index.js":               { "maxDuration": 30  },
+    "api/v1/sources/analyze-repo.js":        { "maxDuration": 60  },
+    "api/v1/engine/[action].js":             { "maxDuration": 300 }
   }
 }

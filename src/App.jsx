@@ -28,6 +28,7 @@ import { PLANS } from './config/services';
 // ── Modals ────────────────────────────────────────────────────
 import AuthModal    from './components/modals/AuthModal';
 import PaymentModal from './components/modals/PaymentModal';
+import AnalyzeModal from './components/modals/AnalyzeModal';
 import ReportsPage  from './pages/ReportsPage';
 
 // ─────────────────────────────────────────────────────────────
@@ -145,18 +146,16 @@ export default function App() {
   };
 
   // ── TEST GENERATION ────────────────────────────────────────
-  const handleAnalyze = async (url) => {
+  const handleAnalyze = async (sourceParams) => {
     setIsGenerating(true);
     setAnalysisProgress(0);
 
     try {
-      const { generated, meta } = await testEngineService.analyzeAndGenerate(
-        url,
-        needsAuth ? authCredentials : null,
+      const { domain, generated, meta, fromCache } = await testEngineService.analyzeAndGenerate(
+        sourceParams,
         (pct, msg) => { setAnalysisProgress(pct); setAnalysisMsg(msg); },
       );
 
-      // Load ALL generated tests — no limits
       let count = 0;
       Object.entries(generated).forEach(([type, list]) => {
         list.forEach(t => addTest(type, t));
@@ -170,13 +169,16 @@ export default function App() {
         ? Object.entries(meta.breakdown).map(([k,v]) => `${k}: ${v}`).join(' · ')
         : '';
 
-      alert(
-        `✅ Analysis complete!\n\n` +
-        `🌐 Pages crawled: ${meta?.pagesAnalyzed || 1}\n` +
-        `🧪 Test cases generated: ${count}\n\n` +
-        `${breakdown}\n\n` +
-        `Pages: ${(meta?.pagesTitles || []).slice(0,5).join(', ')}${(meta?.pagesTitles||[]).length > 5 ? '…' : ''}`
-      );
+      if (fromCache) {
+        alert(`✅ Loaded from cache!\n\n🧪 ${count} test cases restored\n\nTo get fresh results, click "Re-analyze" in the source history.`);
+      } else {
+        alert(
+          `✅ Analysis complete!\n\n` +
+          `🌐 ${meta?.isRepo ? 'Repository' : meta?.isUpload ? 'Source files' : `Pages crawled: ${meta?.pagesAnalyzed||1}`}\n` +
+          `🧪 Test cases generated: ${count}\n\n` +
+          `${breakdown}`
+        );
+      }
     } catch (e) {
       setIsGenerating(false);
       alert(`❌ ${e.message}`);
@@ -417,12 +419,9 @@ export default function App() {
             isGenerating={isGenerating}
             progress={analysisProgress}
             progressMsg={analysisMsg}
-            needsAuth={needsAuth}
-            authCredentials={authCredentials}
-            onNeedsAuthToggle={() => setNeedsAuth(p => !p)}
-            onAuthCredChange={setAuthCredentials}
             onAnalyze={handleAnalyze}
             onCancel={() => setModal(null)}
+            isAuthenticated={isAuthenticated}
           />
         </Modal>
       )}
