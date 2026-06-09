@@ -69,13 +69,11 @@ export default function App() {
   const [importSource, setImportSource]       = useState('');
   const [selectedFailedTest, setSelectedFailedTest] = useState(null);
   const [selectedPlan, setSelectedPlan]       = useState(null);
-  const [needsAuth, setNeedsAuth]             = useState(false);
-  const [authCredentials, setAuthCredentials] = useState({ username: '', password: '' });
 
   const showAds = PLANS[userPlan]?.showAds ?? true;
 
   // ── Page view ────────────────────────────────────────────
-  const [currentView, setCurrentView] = useState('main'); // 'main' | 'reports'
+  const [currentView, setCurrentView] = useState('main');
 
   // ── Helpers ───────────────────────────────────────────────
   const addTest = useCallback((type, testData) => {
@@ -831,75 +829,6 @@ function UpgradeModal({ currentPlan, onSelect }) {
             {currentPlan === plan.id && <div className="text-xs text-emerald-400 font-medium">✓ Current Plan</div>}
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function AnalyzeModal({ isGenerating, progress, progressMsg, needsAuth, authCredentials, onNeedsAuthToggle, onAuthCredChange, onAnalyze, onCancel }) {
-  const [url, setUrl] = useState('');
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Sparkles className="text-purple-400" size={24} />
-        <h2 className="text-xl font-bold text-white">Analyze Website</h2>
-      </div>
-
-      {isGenerating && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm text-slate-300">
-            <Loader className="animate-spin text-purple-400" size={16} />
-            {progressMsg}
-          </div>
-          <div className="w-full bg-slate-700 rounded-full h-2">
-            <div className="bg-gradient-to-r from-purple-600 to-pink-500 h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
-          </div>
-          <p className="text-xs text-slate-500">{progress}% complete</p>
-        </div>
-      )}
-
-      <input type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://example.com" disabled={isGenerating}
-        className="w-full px-3 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 disabled:opacity-50" />
-
-      <div className="bg-slate-700/50 rounded-xl p-3 border border-slate-600/50">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-slate-300">Requires authentication?</span>
-          <button onClick={onNeedsAuthToggle} disabled={isGenerating}
-            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${needsAuth ? 'bg-blue-600 text-white' : 'bg-slate-600 text-slate-300'}`}>
-            {needsAuth ? 'Yes' : 'No'}
-          </button>
-        </div>
-        {needsAuth && (
-          <div className="space-y-2 pt-2 border-t border-slate-600">
-            {[['Username / Email', 'text', 'username', 'admin@example.com'], ['Password', 'password', 'password', '••••••••']].map(([label, type, key, ph]) => (
-              <div key={key}>
-                <label className="block text-xs text-slate-400 mb-1">{label}</label>
-                <input type={type} placeholder={ph} value={authCredentials[key]} disabled={isGenerating}
-                  onChange={e => onAuthCredChange({ ...authCredentials, [key]: e.target.value })}
-                  className="w-full px-3 py-1.5 bg-slate-600 border border-slate-500 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50" />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-slate-700/40 rounded-xl p-3 border border-slate-600/30">
-        <p className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1"><CheckCircle size={12} className="text-emerald-400" /> Analysis includes:</p>
-        <ul className="text-xs text-slate-400 grid grid-cols-2 gap-1">
-          {['Page navigation', 'Menu & submenus', 'Form elements', 'Field validation', 'Submit responses', 'API endpoints', 'Auth flows', 'Security checks'].map(f => (
-            <li key={f} className="flex items-center gap-1"><span className="text-emerald-400">✓</span>{f}</li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="flex gap-2">
-        <button onClick={onCancel} disabled={isGenerating} className="flex-1 py-2.5 border border-slate-600 text-slate-300 rounded-lg text-sm hover:bg-slate-700 disabled:opacity-50">Cancel</button>
-        <button onClick={() => { if (!url) return alert('Enter a URL'); onAnalyze(url); }}
-          disabled={isGenerating}
-          className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
-          {isGenerating ? 'Analyzing…' : 'Start Deep Analysis'}
-        </button>
       </div>
     </div>
   );
