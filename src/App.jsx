@@ -219,15 +219,20 @@ export default function App() {
     setResults([]);
     if (userPlan === 'free') setFreeRunsLeft(p => Math.max(0, p - 1));
 
-    const flat = Object.entries(tests).flatMap(([type, list]) => list.map(t => ({ ...t, type })));
+    try {
+      const flat = Object.entries(tests).flatMap(([type, list]) => list.map(t => ({ ...t, type })));
 
-    await testEngineService.runTests(flat, result => {
-      setCurrentTest(result);
-      setResults(prev => [...prev, result]);
-    }, analyzedUrl);
-
-    setCurrentTest(null);
-    setIsRunning(false);
+      await testEngineService.runTests(flat, result => {
+        setCurrentTest(result);
+        setResults(prev => [...prev, result]);
+      }, analyzedUrl);
+    } catch (err) {
+      console.error('[handleRunTests]', err);
+      alert(`❌ Test run failed: ${err.message}`);
+    } finally {
+      setCurrentTest(null);
+      setIsRunning(false);
+    }
   };
 
   // ── RETEST ─────────────────────────────────────────────────

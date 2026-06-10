@@ -245,20 +245,33 @@ export const testEngineService = {
 
   // ── Run tests ─────────────────────────────────────────────
   async runTests(testList, onTestComplete, siteUrl = '') {
-    const data = await apiFetch(`${BASE}/run`, { method:'POST', body:{ tests:testList } });
-    for (const result of data.results) {
-      await new Promise(r => setTimeout(r, 60));
-      // Use the test's own URL or fall back to the analyzed site URL
-      const screenshotUrl = result.url || siteUrl || '';
-      result.screenshot = await captureScreenshot({ ...result, url: screenshotUrl });
-      if (onTestComplete) onTestComplete(result);
+    try {
+      const data = await apiFetch(`${BASE}/run`, { method:'POST', body:{ tests:testList } });
+      for (const result of data.results) {
+        await new Promise(r => setTimeout(r, 60));
+        try {
+          const screenshotUrl = result.url || siteUrl || '';
+          result.screenshot = await captureScreenshot({ ...result, url: screenshotUrl });
+        } catch (ssErr) {
+          console.warn('[screenshot] Failed:', ssErr.message);
+          result.screenshot = null;
+        }
+        if (onTestComplete) onTestComplete(result);
+      }
+      return data.results;
+    } catch (err) {
+      console.error('[runTests]', err);
+      throw err;
     }
-    return data.results;
   },
 
   async retestSingle(test) {
     const data = await apiFetch(`${BASE}/retest`, { method:'POST', body:{ test } });
-    data.result.screenshot = await captureScreenshot(data.result);
+    try {
+      data.result.screenshot = await captureScreenshot(data.result);
+    } catch (e) {
+      data.result.screenshot = null;
+    }
     return data.result;
   },
 };
@@ -402,6 +415,22 @@ async function captureScreenshot(test) {
 }
 
 // ── Annotated screenshot showing test info + website URL ──────
+function roundRect(ctx, x, y, w, h, r = 6) {
+  // Safe polyfill — works in all browsers including older ones
+  r = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
 function generateAnnotatedScreenshot(test, url = '') {
   const canvas = document.createElement('canvas');
   canvas.width  = 1280;
@@ -423,8 +452,7 @@ function generateAnnotatedScreenshot(test, url = '') {
 
   // URL bar
   ctx.fillStyle = '#2a3347';
-  ctx.beginPath();
-  ctx.roundRect(105, 12, 900, 28, 6);
+  roundRect(ctx, 105, 12, 900, 28, 6);
   ctx.fill();
   ctx.fillStyle = test.status === 'passed' ? '#00d4aa' : '#f87171';
   ctx.font = '12px monospace';
@@ -432,7 +460,7 @@ function generateAnnotatedScreenshot(test, url = '') {
 
   // Status badge
   ctx.fillStyle = test.status === 'passed' ? 'rgba(0,212,170,0.15)' : 'rgba(248,113,113,0.15)';
-  ctx.beginPath(); ctx.roundRect(1040, 12, 220, 28, 6); ctx.fill();
+  roundRect(ctx, 1040, 12, 220, 28, 6); ctx.fill();
   ctx.fillStyle = test.status === 'passed' ? '#00d4aa' : '#f87171';
   ctx.font = 'bold 12px sans-serif';
   ctx.textAlign = 'center';
@@ -500,7 +528,7 @@ function drawSimulatedPage(ctx, test, url) {
 
   // CTA button
   ctx.fillStyle = '#00d4aa';
-  ctx.beginPath(); ctx.roundRect(1140, 66, 110, 28, 6); ctx.fill();
+  roundRect(ctx, 1140, 66, 110, 28, 6); ctx.fill();
   ctx.fillStyle = '#0a0f1e';
   ctx.font = 'bold 12px sans-serif';
   ctx.fillText('Get Started', 1155, 84);
@@ -508,7 +536,7 @@ function drawSimulatedPage(ctx, test, url) {
   if (type === 'ui' || type === 'security') {
     // Form-style page
     ctx.fillStyle = '#111b3a';
-    ctx.beginPath(); ctx.roundRect(390, 150, 500, 440, 12); ctx.fill();
+    roundRect(ctx, 390, 150, 500, 440, 12); ctx.fill();
     ctx.strokeStyle = 'rgba(0,212,170,0.2)';
     ctx.lineWidth = 1; ctx.stroke();
 
@@ -519,7 +547,7 @@ function drawSimulatedPage(ctx, test, url) {
 
     // Form fields
     [['Email address', 180, '#1a2540'], ['Password', 260, '#1a2540']].forEach(([ph, y, bg]) => {
-      ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(430, y + 80, 420, 44, 8); ctx.fill();
+      ctx.fillStyle = bg; roundRect(ctx, 430, y + 80, 420, 44, 8); ctx.fill();
       ctx.strokeStyle = 'rgba(0,212,170,0.25)'; ctx.stroke();
       ctx.fillStyle = '#6b7fa3'; ctx.font = '13px sans-serif';
       ctx.fillText(ph, 448, y + 107);
@@ -527,7 +555,7 @@ function drawSimulatedPage(ctx, test, url) {
 
     // Submit button
     ctx.fillStyle = test.status === 'passed' ? '#00d4aa' : '#f87171';
-    ctx.beginPath(); ctx.roundRect(430, 480, 420, 46, 8); ctx.fill();
+    roundRect(ctx, 430, 480, 420, 46, 8); ctx.fill();
     ctx.fillStyle = '#0a0f1e'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(test.status === 'passed' ? '✓ Login Successful' : '✗ Login Failed', 640, 509);
     ctx.textAlign = 'left';
@@ -535,7 +563,7 @@ function drawSimulatedPage(ctx, test, url) {
     // Test highlight overlay
     if (test.status === 'failed') {
       ctx.strokeStyle = '#f87171'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.roundRect(428, 338, 424, 48, 8); ctx.stroke();
+      roundRect(ctx, 428, 338, 424, 48, 8); ctx.stroke();
       ctx.fillStyle = 'rgba(248,113,113,0.1)'; ctx.fill();
       ctx.fillStyle = '#f87171'; ctx.font = '11px sans-serif';
       ctx.fillText('⚠ Assertion failed here', 432, 402);
@@ -544,7 +572,7 @@ function drawSimulatedPage(ctx, test, url) {
   } else if (type === 'api') {
     // API response view
     ctx.fillStyle = '#0a0f1e';
-    ctx.beginPath(); ctx.roundRect(80, 130, 580, 480, 8); ctx.fill();
+    roundRect(ctx, 80, 130, 580, 480, 8); ctx.fill();
     ctx.strokeStyle = 'rgba(0,212,170,0.2)'; ctx.stroke();
 
     ctx.fillStyle = '#111b3a';
@@ -570,7 +598,7 @@ function drawSimulatedPage(ctx, test, url) {
 
     // Right: response details
     ctx.fillStyle = '#111b3a';
-    ctx.beginPath(); ctx.roundRect(700, 130, 500, 240, 8); ctx.fill();
+    roundRect(ctx, 700, 130, 500, 240, 8); ctx.fill();
     ctx.strokeStyle = 'rgba(0,212,170,0.2)'; ctx.stroke();
     ctx.fillStyle = '#6b7fa3'; ctx.font = '11px sans-serif';
     [['Status',test.status==='passed'?'200 OK':'400 Bad Request'],['Time',`${test.duration||0}ms`],['Size','1.2 KB'],['Type','application/json']].forEach(([k,v],i) => {
@@ -585,7 +613,7 @@ function drawSimulatedPage(ctx, test, url) {
     ctx.fillText('Performance Report', 640, 140); ctx.textAlign = 'left';
     metrics.forEach(([name, val, color, score], i) => {
       const x = 100 + i*280, y = 200;
-      ctx.fillStyle = '#111b3a'; ctx.beginPath(); ctx.roundRect(x, y, 240, 160, 10); ctx.fill();
+      ctx.fillStyle = '#111b3a'; roundRect(ctx, x, y, 240, 160, 10); ctx.fill();
       ctx.strokeStyle = color + '44'; ctx.stroke();
       ctx.fillStyle = color; ctx.font = 'bold 36px monospace'; ctx.textAlign = 'center';
       ctx.fillText(val, x+120, y+70);
@@ -602,7 +630,7 @@ function drawSimulatedPage(ctx, test, url) {
   } else {
     // Generic test page
     ctx.fillStyle = '#111b3a';
-    ctx.beginPath(); ctx.roundRect(80, 140, 800, 60, 8); ctx.fill();
+    roundRect(ctx, 80, 140, 800, 60, 8); ctx.fill();
     ctx.fillStyle = test.status==='passed' ? '#00d4aa' : '#f87171';
     ctx.font = 'bold 16px sans-serif';
     ctx.fillText(test.status==='passed' ? '✓ Test assertion passed' : '✗ Test assertion failed', 100, 177);
