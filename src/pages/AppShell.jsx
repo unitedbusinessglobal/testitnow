@@ -16,7 +16,7 @@ import {
   RefreshCw, Clock, Copy, ExternalLink, AlertTriangle,
   Zap, Settings,
 } from 'lucide-react';
-import { getAllTestPlans, generateScript } from '../lib/scriptGenerator';
+import { getTheme, THEMES } from '../lib/theme';
 
 // ── Design tokens ─────────────────────────────────────────────
 const C = {
@@ -65,13 +65,14 @@ function Spinner() {
     const t = setInterval(() => setF(n => (n+1)%frames.length), 80);
     return () => clearInterval(t);
   }, []);
-  return <span style={{ color:C.teal, fontSize:14, fontFamily:'monospace' }}>{frames[f]}</span>;
+  return <span style={{ color:'#00d4aa', fontSize:14, fontFamily:'monospace' }}>{frames[f]}</span>;
 }
 
 // ─────────────────────────────────────────────────────────────
 // SIDEBAR
 // ─────────────────────────────────────────────────────────────
-function Sidebar({ active, setActive, userProfile, userPlan, onLogout, onUpgrade, onReports, totalTests, results }) {
+function Sidebar({ active, setActive, userProfile, userPlan, onLogout, onUpgrade, onReports, totalTests, results, T, theme, setTheme }) {
+  const [showThemes, setShowThemes] = useState(false);
   const nav = [
     { id:'analyze',      icon:Sparkles,    label:'Analyze',      badge:null },
     { id:'tests',        icon:Layers,      label:'Test Cases',   badge:totalTests||null },
@@ -83,18 +84,18 @@ function Sidebar({ active, setActive, userProfile, userPlan, onLogout, onUpgrade
   ];
 
   return (
-    <aside style={{ width:220, flexShrink:0, background:C.sidebar, borderRight:`1px solid ${C.border}`, display:'flex', flexDirection:'column', height:'100vh', position:'sticky', top:0 }}>
+    <aside style={{ width:220, flexShrink:0, background:T.sidebar, borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', height:'100vh', position:'sticky', top:0, boxShadow:T.shadow }}>
       {/* Logo */}
-      <div style={{ padding:'20px 16px 14px', borderBottom:`1px solid ${C.border}` }}>
+      <div style={{ padding:'18px 16px 12px', borderBottom:`1px solid ${T.border}` }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <div style={{ width:30, height:30, borderRadius:8, background:`linear-gradient(135deg,${C.teal},${C.blue})`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:15 }}>⚡</div>
-          <span style={{ color:C.white, fontWeight:800, fontSize:16, letterSpacing:'-0.5px' }}>TestIt<span style={{ color:C.teal }}>Now</span></span>
+          <div style={{ width:30, height:30, borderRadius:8, background:`linear-gradient(135deg,${T.accent},${T.blue})`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:15 }}>⚡</div>
+          <span style={{ color:T.text, fontWeight:800, fontSize:16, letterSpacing:'-0.5px' }}>TestIt<span style={{ color:T.accent }}>Now</span></span>
         </div>
       </div>
 
       {/* Nav */}
       <nav style={{ flex:1, padding:'10px 8px', overflowY:'auto' }}>
-        <div style={{ color:C.gray, fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', padding:'6px 8px 4px' }}>Workspace</div>
+        <div style={{ color:T.textMuted, fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', padding:'6px 8px 4px' }}>Workspace</div>
         {nav.map(item => {
           const Icon = item.icon;
           const on   = active === item.id;
@@ -102,43 +103,62 @@ function Sidebar({ active, setActive, userProfile, userPlan, onLogout, onUpgrade
             <button key={item.id} onClick={() => setActive(item.id)} style={{
               width:'100%', display:'flex', alignItems:'center', gap:10,
               padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer',
-              background: on ? C.tealDim : 'transparent',
-              color: on ? C.teal : C.grayLight,
+              background: on ? T.accentDim : 'transparent',
+              color: on ? T.accent : T.textSub,
               fontSize:13, fontWeight: on ? 600 : 400, marginBottom:2,
-              borderLeft:`2px solid ${on ? C.teal : 'transparent'}`,
+              borderLeft:`2px solid ${on ? T.accent : 'transparent'}`,
               transition:'all 0.15s',
             }}>
               <Icon size={14}/>
               <span style={{ flex:1, textAlign:'left' }}>{item.label}</span>
-              {item.badge ? <span style={{ background: on ? C.teal : 'rgba(255,255,255,0.08)', color: on ? C.bg : C.gray, fontSize:10, fontWeight:700, padding:'1px 6px', borderRadius:10 }}>{item.badge}</span> : null}
+              {item.badge ? <span style={{ background: on ? T.accent : T.border, color: on ? '#fff' : T.textMuted, fontSize:10, fontWeight:700, padding:'1px 6px', borderRadius:10 }}>{item.badge}</span> : null}
             </button>
           );
         })}
 
         <div style={{ marginTop:14 }}>
-          <div style={{ color:C.gray, fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', padding:'6px 8px 4px' }}>Reports</div>
-          <button onClick={onReports} style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:C.grayLight, fontSize:13 }}>
+          <div style={{ color:T.textMuted, fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', padding:'6px 8px 4px' }}>Reports</div>
+          <button onClick={onReports} style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:T.textSub, fontSize:13 }}>
             <BarChart2 size={14}/> Reports & Export
           </button>
+        </div>
+
+        {/* Theme picker */}
+        <div style={{ marginTop:14 }}>
+          <div style={{ color:T.textMuted, fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', padding:'6px 8px 4px' }}>Appearance</div>
+          <button onClick={()=>setShowThemes(p=>!p)} style={{ width:'100%', display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:T.textSub, fontSize:13 }}>
+            <span>{THEMES[theme]?.icon}</span>
+            <span style={{ flex:1, textAlign:'left' }}>{THEMES[theme]?.name}</span>
+            <span style={{ fontSize:10 }}>▾</span>
+          </button>
+          {showThemes && (
+            <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, padding:'6px', margin:'4px 0', boxShadow:T.shadow }}>
+              {Object.entries(THEMES).map(([key, th]) => (
+                <button key={key} onClick={()=>{ setTheme(key); setShowThemes(false); }} style={{ width:'100%', display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:7, border:'none', cursor:'pointer', background: theme===key ? T.accentDim : 'transparent', color: theme===key ? T.accentText : T.textSub, fontSize:12, fontWeight: theme===key?700:400, textAlign:'left' }}>
+                  <span>{th.icon}</span> {th.name} {theme===key&&<span style={{ marginLeft:'auto', fontSize:10 }}>✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </nav>
 
       {/* User */}
-      <div style={{ borderTop:`1px solid ${C.border}`, padding:'10px 8px' }}>
+      <div style={{ borderTop:`1px solid ${T.border}`, padding:'10px 8px' }}>
         {userPlan === 'free' && (
-          <button onClick={onUpgrade} style={{ width:'100%', padding:'8px', borderRadius:8, border:'none', background:`linear-gradient(90deg,rgba(0,212,170,0.15),rgba(59,130,246,0.15))`, color:C.teal, fontSize:12, fontWeight:700, cursor:'pointer', marginBottom:8, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+          <button onClick={onUpgrade} style={{ width:'100%', padding:'8px', borderRadius:8, border:'none', background:T.accentDim, color:T.accentText, fontSize:12, fontWeight:700, cursor:'pointer', marginBottom:8, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
             <Crown size={13}/> Upgrade to Pro
           </button>
         )}
         <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 8px' }}>
-          <div style={{ width:28, height:28, borderRadius:'50%', background:`linear-gradient(135deg,${C.teal},${C.blue})`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:C.bg, flexShrink:0 }}>
+          <div style={{ width:28, height:28, borderRadius:'50%', background:`linear-gradient(135deg,${T.accent},${T.blue})`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:'#fff', flexShrink:0 }}>
             {(userProfile?.name||'U')[0].toUpperCase()}
           </div>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ color:C.white, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{userProfile?.name||'User'}</div>
-            <div style={{ color:C.gray, fontSize:10, textTransform:'capitalize' }}>{userPlan} plan</div>
+            <div style={{ color:T.text, fontSize:12, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{userProfile?.name||'User'}</div>
+            <div style={{ color:T.textMuted, fontSize:10, textTransform:'capitalize' }}>{userPlan} plan</div>
           </div>
-          <button onClick={onLogout} style={{ background:'none', border:'none', color:C.gray, cursor:'pointer', padding:4 }} title="Sign out"><LogOut size={13}/></button>
+          <button onClick={onLogout} style={{ background:'none', border:'none', color:T.textMuted, cursor:'pointer', padding:4 }} title="Sign out"><LogOut size={13}/></button>
         </div>
       </div>
     </aside>
@@ -148,7 +168,7 @@ function Sidebar({ active, setActive, userProfile, userPlan, onLogout, onUpgrade
 // ─────────────────────────────────────────────────────────────
 // ANALYZE HERO — center stage
 // ─────────────────────────────────────────────────────────────
-function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTests, setActive, activeTab, setActiveTab, tests, results, summary, isRunning, currentTest, onRun, canRun }) {
+function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTests, setActive, activeTab, setActiveTab, tests, results, summary, isRunning, currentTest, onRun, canRun, T }) {
   const [url,         setUrl]         = useState('');
   const [srcType,     setSrcType]     = useState('url');
   const [owner,       setOwner]       = useState('');
@@ -222,7 +242,7 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
   const hasTests = totalTests > 0;
 
   return (
-    <div style={{ flex:1, display:'flex', flexDirection:'column', background:C.bg, overflowY:'auto' }}>
+    <div style={{ flex:1, display:'flex', flexDirection:'column', background:T.bg, overflowY:'auto' }}>
       {/* Glow */}
       <div style={{ position:'fixed', top:'20%', left:'50%', transform:'translate(-50%,-50%)', width:700, height:300, borderRadius:'50%', background:'radial-gradient(ellipse, rgba(0,212,170,0.04) 0%, transparent 70%)', pointerEvents:'none', zIndex:0 }}/>
 
@@ -230,14 +250,14 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
 
         {!hasTests && (
           <>
-            <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:'rgba(0,212,170,0.08)', border:`1px solid ${C.border}`, borderRadius:20, padding:'5px 14px', marginBottom:24 }}>
-              <Sparkles size={12} style={{ color:C.teal }}/>
-              <span style={{ color:C.teal, fontSize:12, fontWeight:600, letterSpacing:'0.05em' }}>AI-POWERED TEST GENERATION</span>
+            <div style={{ display:'inline-flex', alignItems:'center', gap:8, background:'rgba(0,212,170,0.08)', border:`1px solid ${T.border}`, borderRadius:20, padding:'5px 14px', marginBottom:24 }}>
+              <Sparkles size={12} style={{ color:T.accent }}/>
+              <span style={{ color:T.accent, fontSize:12, fontWeight:600, letterSpacing:'0.05em' }}>AI-POWERED TEST GENERATION</span>
             </div>
-            <h1 style={{ fontSize:'clamp(28px,4vw,52px)', fontWeight:900, color:C.white, letterSpacing:'-2px', marginBottom:12, lineHeight:1.05, textAlign:'center' }}>
+            <h1 style={{ fontSize:'clamp(28px,4vw,52px)', fontWeight:900, color:T.text, letterSpacing:'-2px', marginBottom:12, lineHeight:1.05, textAlign:'center' }}>
               What would you like to test?
             </h1>
-            <p style={{ color:C.gray, fontSize:15, marginBottom:36, textAlign:'center', maxWidth:480 }}>
+            <p style={{ color:T.textMuted, fontSize:15, marginBottom:36, textAlign:'center', maxWidth:480 }}>
               Website · GitHub · GitLab · Azure DevOps · Source upload<br/>
               Get 1,000+ test cases in under 60 seconds.
             </p>
@@ -249,8 +269,8 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
           {srcTabs.map(s => (
             <button key={s.id} onClick={() => setSrcType(s.id)} style={{
               padding:'6px 14px', borderRadius:20, border:'none', cursor:'pointer',
-              background: srcType===s.id ? C.teal : 'rgba(255,255,255,0.06)',
-              color: srcType===s.id ? C.bg : C.grayLight,
+              background: srcType===s.id ? T.accent : 'rgba(255,255,255,0.06)',
+              color: srcType===s.id ? T.bg : T.textSub,
               fontSize:12, fontWeight: srcType===s.id ? 700 : 400, transition:'all 0.2s',
             }}>{s.icon} {s.label}</button>
           ))}
@@ -259,14 +279,14 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
         {/* OAuth connected badge */}
         {oauthStatus && (
           <div style={{ marginBottom:10, display:'inline-flex', alignItems:'center', gap:8, background:'rgba(0,212,170,0.1)', border:`1px solid rgba(0,212,170,0.3)`, borderRadius:20, padding:'5px 14px' }}>
-            <CheckCircle size={13} style={{ color:C.teal }}/>
-            <span style={{ color:C.teal, fontSize:12, fontWeight:600 }}>Connected to {oauthStatus.provider} {oauthStatus.user ? `as ${oauthStatus.user}` : ''}</span>
-            <button onClick={() => { setOauthStatus(null); setToken(''); }} style={{ background:'none', border:'none', color:C.gray, cursor:'pointer', padding:2 }}><X size={11}/></button>
+            <CheckCircle size={13} style={{ color:T.accent }}/>
+            <span style={{ color:T.accent, fontSize:12, fontWeight:600 }}>Connected to {oauthStatus.provider} {oauthStatus.user ? `as ${oauthStatus.user}` : ''}</span>
+            <button onClick={() => { setOauthStatus(null); setToken(''); }} style={{ background:'none', border:'none', color:T.textMuted, cursor:'pointer', padding:2 }}><X size={11}/></button>
           </div>
         )}
 
         {/* Main input box */}
-        <div style={{ width:'100%', maxWidth:680, background:C.card, border:`1.5px solid ${focused ? C.teal : C.border}`, borderRadius:16, overflow:'hidden', boxShadow: focused ? `0 0 0 3px rgba(0,212,170,0.1)` : 'none', transition:'all 0.2s' }}>
+        <div style={{ width:'100%', maxWidth:680, background:T.bgCard, border:`1.5px solid ${focused ? T.accent : T.border}`, borderRadius:16, overflow:'hidden', boxShadow: focused ? `0 0 0 3px rgba(0,212,170,0.1)` : 'none', transition:'all 0.2s' }}>
 
           {/* URL / top row */}
           {srcType !== 'upload' && (
@@ -282,10 +302,10 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
                   azure: 'https://dev.azure.com/org/project',
                 }[srcType]}
                 disabled={isGenerating}
-                style={{ flex:1, background:'none', border:'none', outline:'none', color:C.white, fontSize:15, fontFamily:'inherit' }}/>
+                style={{ flex:1, background:'none', border:'none', outline:'none', color:T.text, fontSize:15, fontFamily:'inherit' }}/>
               <button onClick={handleSubmit} disabled={isGenerating} style={{
-                background: isGenerating ? 'rgba(0,212,170,0.25)' : `linear-gradient(135deg,${C.teal},${C.blue})`,
-                border:'none', color:C.bg, padding:'9px 18px', borderRadius:9,
+                background: isGenerating ? 'rgba(0,212,170,0.25)' : `linear-gradient(135deg,${T.accent},${T.blue})`,
+                border:'none', color:T.bg, padding:'9px 18px', borderRadius:9,
                 fontSize:13, fontWeight:700, cursor: isGenerating ? 'not-allowed' : 'pointer',
                 display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap',
               }}>
@@ -296,45 +316,45 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
 
           {/* GitHub/GitLab/Azure extra fields */}
           {['github','gitlab','azure'].includes(srcType) && (
-            <div style={{ borderTop:`1px solid ${C.border}`, display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:0 }}>
+            <div style={{ borderTop:`1px solid ${T.border}`, display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:0 }}>
               {[
                 { ph:`${srcType === 'azure' ? 'Organization' : 'Owner'} / namespace`, val:owner, set:setOwner },
                 { ph:`${srcType === 'azure' ? 'Project' : 'Repository'} name`,       val:repo,  set:setRepo  },
                 { ph:'Branch (default: main)',                                         val:branch, set:setBranch },
               ].map((f,i) => (
                 <input key={i} value={f.val} onChange={e=>f.set(e.target.value)} placeholder={f.ph}
-                  style={{ background:'none', border:'none', borderRight: i<2?`1px solid ${C.border}`:'none', outline:'none', color:C.white, fontSize:12, padding:'10px 14px', fontFamily:'inherit' }}/>
+                  style={{ background:'none', border:'none', borderRight: i<2?`1px solid ${T.border}`:'none', outline:'none', color:T.text, fontSize:12, padding:'10px 14px', fontFamily:'inherit' }}/>
               ))}
             </div>
           )}
 
           {/* OAuth buttons + PAT */}
           {['github','gitlab','azure'].includes(srcType) && (
-            <div style={{ borderTop:`1px solid ${C.border}`, padding:'12px 16px', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-              <span style={{ color:C.gray, fontSize:12 }}>Sign in:</span>
+            <div style={{ borderTop:`1px solid ${T.border}`, padding:'12px 16px', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <span style={{ color:T.textMuted, fontSize:12 }}>Sign in:</span>
               <button onClick={() => handleOAuth(srcType)} style={{
                 display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:8,
-                border:`1px solid ${C.border}`, background:'rgba(255,255,255,0.05)',
-                color:C.white, fontSize:12, fontWeight:600, cursor:'pointer', transition:'all 0.2s',
+                border:`1px solid ${T.border}`, background:T.bgHover,
+                color:T.text, fontSize:12, fontWeight:600, cursor:'pointer', transition:'all 0.2s',
               }}
-              onMouseEnter={e=>e.currentTarget.style.borderColor=C.teal}
-              onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+              onMouseEnter={e=>e.currentTarget.style.borderColor=T.accent}
+              onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}>
                 {{github:<Github size={13}/>, gitlab:<GitBranch size={13}/>, azure:<Cloud size={13}/>}[srcType]}
                 Connect {srcType === 'github' ? 'GitHub' : srcType === 'gitlab' ? 'GitLab' : 'Azure DevOps'}
               </button>
-              <span style={{ color:C.gray, fontSize:11 }}>or paste token:</span>
+              <span style={{ color:T.textMuted, fontSize:11 }}>or paste token:</span>
               <input value={token} onChange={e=>setToken(e.target.value)} type="password"
                 placeholder={`${srcType === 'github' ? 'ghp_' : srcType === 'gitlab' ? 'glpat-' : ''}Personal Access Token`}
-                style={{ flex:1, minWidth:160, background:'rgba(255,255,255,0.05)', border:`1px solid ${C.border}`, borderRadius:7, color:C.white, fontSize:12, padding:'6px 10px', outline:'none', fontFamily:'inherit' }}/>
+                style={{ flex:1, minWidth:160, background:T.bgHover, border:`1px solid ${T.border}`, borderRadius:7, color:T.text, fontSize:12, padding:'6px 10px', outline:'none', fontFamily:'inherit' }}/>
             </div>
           )}
 
           {/* Upload */}
           {srcType === 'upload' && (
             <label style={{ display:'block', padding:'32px', textAlign:'center', cursor:'pointer' }}>
-              <FileUp size={28} style={{ color:C.gray, marginBottom:8 }}/>
-              <p style={{ color:C.grayLight, fontSize:14, marginBottom:4 }}>Click to upload source files</p>
-              <p style={{ color:C.gray, fontSize:12 }}>JS · TS · Python · Go · Java · SQL · YAML</p>
+              <FileUp size={28} style={{ color:T.textMuted, marginBottom:8 }}/>
+              <p style={{ color:T.textSub, fontSize:14, marginBottom:4 }}>Click to upload source files</p>
+              <p style={{ color:T.textMuted, fontSize:12 }}>JS · TS · Python · Go · Java · SQL · YAML</p>
               <input type="file" multiple accept=".js,.ts,.jsx,.tsx,.py,.go,.java,.sql,.yaml,.yml,.md" style={{ display:'none' }}
                 onChange={e => {
                   const files = Array.from(e.target.files);
@@ -350,14 +370,14 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
 
         {/* Progress */}
         {isGenerating && (
-          <div style={{ width:'100%', maxWidth:680, marginTop:16, background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:'14px 18px' }}>
+          <div style={{ width:'100%', maxWidth:680, marginTop:16, background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:'14px 18px' }}>
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
               <Spinner/>
-              <span style={{ color:C.grayLight, fontSize:13, flex:1 }}>{progressMsg||'Analyzing…'}</span>
-              <span style={{ color:C.teal, fontSize:12, fontFamily:'monospace' }}>{progress}%</span>
+              <span style={{ color:T.textSub, fontSize:13, flex:1 }}>{progressMsg||'Analyzing…'}</span>
+              <span style={{ color:T.accent, fontSize:12, fontFamily:'monospace' }}>{progress}%</span>
             </div>
-            <div style={{ background:'rgba(255,255,255,0.06)', borderRadius:4, height:4 }}>
-              <div style={{ height:'100%', borderRadius:4, background:`linear-gradient(90deg,${C.teal},${C.blue})`, width:`${progress}%`, transition:'width 0.5s ease' }}/>
+            <div style={{ background:T.bgHover, borderRadius:4, height:4 }}>
+              <div style={{ height:'100%', borderRadius:4, background:`linear-gradient(90deg,${T.accent},${T.blue})`, width:`${progress}%`, transition:'width 0.5s ease' }}/>
             </div>
           </div>
         )}
@@ -365,9 +385,9 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
         {/* Quick examples */}
         {!hasTests && !isGenerating && srcType === 'url' && (
           <div style={{ marginTop:20, display:'flex', gap:8, justifyContent:'center', flexWrap:'wrap' }}>
-            <span style={{ color:C.gray, fontSize:12 }}>Try:</span>
+            <span style={{ color:T.textMuted, fontSize:12 }}>Try:</span>
             {['https://github.com','https://vercel.com','https://stripe.com'].map(ex => (
-              <button key={ex} onClick={() => setUrl(ex)} style={{ background:'rgba(255,255,255,0.04)', border:`1px solid ${C.border}`, color:C.grayLight, padding:'4px 12px', borderRadius:20, fontSize:12, cursor:'pointer' }}>{ex}</button>
+              <button key={ex} onClick={() => setUrl(ex)} style={{ background:T.bgHover, border:`1px solid ${T.border}`, color:T.textSub, padding:'4px 12px', borderRadius:20, fontSize:12, cursor:'pointer' }}>{ex}</button>
             ))}
           </div>
         )}
@@ -379,23 +399,23 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
             {results.length > 0 && (
               <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
                 {[
-                  { label:'Total',   val:summary.total,              color:C.white },
+                  { label:'Total',   val:summary.total,              color:T.text },
                   { label:'Passed',  val:summary.passed,             color:'#4ade80' },
                   { label:'Failed',  val:summary.failed,             color:'#f87171' },
-                  { label:'Rate',    val:`${summary.passRate||0}%`,  color:C.teal },
-                  { label:'Time',    val:`${((summary.duration||0)/1000).toFixed(1)}s`, color:C.blue },
+                  { label:'Rate',    val:`${summary.passRate||0}%`,  color:T.accent },
+                  { label:'Time',    val:`${((summary.duration||0)/1000).toFixed(1)}s`, color:T.blue },
                 ].map(s => (
-                  <div key={s.label} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:'10px 18px', textAlign:'center', minWidth:80 }}>
+                  <div key={s.label} style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, padding:'10px 18px', textAlign:'center', minWidth:80 }}>
                     <div style={{ color:s.color, fontWeight:800, fontSize:20, fontFamily:'monospace' }}>{s.val}</div>
-                    <div style={{ color:C.gray, fontSize:11 }}>{s.label}</div>
+                    <div style={{ color:T.textMuted, fontSize:11 }}>{s.label}</div>
                   </div>
                 ))}
                 {isRunning && currentTest && (
                   <div style={{ flex:1, background:'rgba(59,130,246,0.08)', border:`1px solid rgba(59,130,246,0.3)`, borderRadius:10, padding:'10px 16px', display:'flex', alignItems:'center', gap:10 }}>
                     <Spinner/>
                     <div>
-                      <div style={{ color:C.white, fontSize:12, fontWeight:600 }}>{currentTest.name}</div>
-                      <div style={{ color:C.gray, fontSize:11 }}>{currentTest.type}</div>
+                      <div style={{ color:T.text, fontSize:12, fontWeight:600 }}>{currentTest.name}</div>
+                      <div style={{ color:T.textMuted, fontSize:11 }}>{currentTest.type}</div>
                     </div>
                   </div>
                 )}
@@ -409,15 +429,15 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
                 const Icon  = TYPE_ICONS[type];
                 return (
                   <button key={type} onClick={() => { setActive('tests'); setActiveTab(type); }} style={{
-                    background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:'14px', cursor:'pointer', textAlign:'left', borderTop:`2px solid ${TYPE_COLORS[type]}`, transition:'all 0.15s',
+                    background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, padding:'14px', cursor:'pointer', textAlign:'left', borderTop:`2px solid ${TYPE_COLORS[type]}`, transition:'all 0.15s',
                   }}
                   onMouseEnter={e=>{ e.currentTarget.style.transform='translateY(-2px)'; e.currentTarget.style.borderTopColor=TYPE_COLORS[type]; e.currentTarget.style.borderColor=TYPE_COLORS[type]+'44'; }}
-                  onMouseLeave={e=>{ e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.borderColor=C.border; e.currentTarget.style.borderTopColor=TYPE_COLORS[type]; }}>
+                  onMouseLeave={e=>{ e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.borderColor=T.border; e.currentTarget.style.borderTopColor=TYPE_COLORS[type]; }}>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
                       <Icon size={14} style={{ color:TYPE_COLORS[type] }}/>
                       <span style={{ color:TYPE_COLORS[type], fontFamily:'monospace', fontWeight:800, fontSize:20 }}>{count}</span>
                     </div>
-                    <div style={{ color:C.white, fontSize:11, fontWeight:600, textTransform:'uppercase' }}>{type}</div>
+                    <div style={{ color:T.text, fontSize:11, fontWeight:600, textTransform:'uppercase' }}>{type}</div>
                   </button>
                 );
               })}
@@ -427,8 +447,8 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
             <div style={{ marginTop:16, display:'flex', gap:10 }}>
               <button onClick={onRun} disabled={isRunning||!canRun} style={{
                 flex:1, padding:'12px', borderRadius:10, border:'none', cursor: isRunning||!canRun ? 'not-allowed' : 'pointer',
-                background: isRunning||!canRun ? 'rgba(255,255,255,0.06)' : `linear-gradient(135deg,${C.teal},${C.blue})`,
-                color: isRunning||!canRun ? C.gray : C.bg, fontSize:14, fontWeight:700,
+                background: isRunning||!canRun ? 'rgba(255,255,255,0.06)' : `linear-gradient(135deg,${T.accent},${T.blue})`,
+                color: isRunning||!canRun ? T.textMuted : T.bg, fontSize:14, fontWeight:700,
                 display:'flex', alignItems:'center', justifyContent:'center', gap:8,
               }}>
                 <Play size={15}/>{isRunning ? 'Running…' : `Run All ${totalTests} Tests`}
@@ -508,77 +528,77 @@ function TestPlansPanel({ tests, results }) {
   return (
     <PanelShell title="Test Plans & Iterations">
       {/* New plan form */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:'16px', marginBottom:14 }}>
-        <div style={{ color:C.white, fontSize:13, fontWeight:700, marginBottom:12 }}>Save Current Test Run as Plan</div>
+      <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:'16px', marginBottom:14 }}>
+        <div style={{ color:T.text, fontSize:13, fontWeight:700, marginBottom:12 }}>Save Current Test Run as Plan</div>
         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
           <input value={planName} onChange={e=>setPlanName(e.target.value)} placeholder="Plan name e.g. Sprint 12 Regression"
-            style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, color:C.white, fontSize:13, padding:'8px 12px', outline:'none', fontFamily:'inherit' }}/>
+            style={{ background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, padding:'8px 12px', outline:'none', fontFamily:'inherit' }}/>
           <div style={{ display:'flex', gap:8 }}>
             <input value={iteration} onChange={e=>setIteration(e.target.value)} placeholder="Iteration e.g. v1.2"
-              style={{ flex:1, background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, color:C.white, fontSize:13, padding:'8px 12px', outline:'none', fontFamily:'inherit' }}/>
+              style={{ flex:1, background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, padding:'8px 12px', outline:'none', fontFamily:'inherit' }}/>
             <select value={framework} onChange={e=>setFramework(e.target.value)}
-              style={{ flex:1, background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, color:C.white, fontSize:13, padding:'8px 10px', outline:'none' }}>
+              style={{ flex:1, background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, padding:'8px 10px', outline:'none' }}>
               {fws.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
             </select>
           </div>
           <button onClick={savePlan} disabled={!planName.trim()} style={{
             padding:'9px', borderRadius:8, border:'none', cursor: planName ? 'pointer' : 'not-allowed',
-            background: planName ? `linear-gradient(135deg,${C.teal},${C.blue})` : 'rgba(255,255,255,0.06)',
-            color: planName ? C.bg : C.gray, fontSize:13, fontWeight:700,
+            background: planName ? `linear-gradient(135deg,${T.accent},${T.blue})` : 'rgba(255,255,255,0.06)',
+            color: planName ? T.bg : T.textMuted, fontSize:13, fontWeight:700,
           }}>Save Plan & Generate Scripts</button>
         </div>
       </div>
 
       {/* Framework selector */}
       <div style={{ marginBottom:12 }}>
-        <div style={{ color:C.gray, fontSize:11, fontWeight:600, textTransform:'uppercase', marginBottom:8 }}>Script Frameworks</div>
+        <div style={{ color:T.textMuted, fontSize:11, fontWeight:600, textTransform:'uppercase', marginBottom:8 }}>Script Frameworks</div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
           {fws.map(f => (
-            <div key={f.id} style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 12px' }}>
+            <div key={f.id} style={{ background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, padding:'10px 12px' }}>
               <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
                 <div style={{ width:8, height:8, borderRadius:'50%', background:f.color }}/>
-                <span style={{ color:C.white, fontSize:12, fontWeight:700 }}>{f.label}</span>
+                <span style={{ color:T.text, fontSize:12, fontWeight:700 }}>{f.label}</span>
               </div>
-              <div style={{ color:C.gray, fontSize:11 }}>{f.desc}</div>
+              <div style={{ color:T.textMuted, fontSize:11 }}>{f.desc}</div>
             </div>
           ))}
         </div>
       </div>
 
       {/* Saved plans */}
-      <div style={{ color:C.gray, fontSize:11, fontWeight:600, textTransform:'uppercase', marginBottom:8 }}>Saved Plans ({plans.length})</div>
+      <div style={{ color:T.textMuted, fontSize:11, fontWeight:600, textTransform:'uppercase', marginBottom:8 }}>Saved Plans ({plans.length})</div>
       <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:'calc(100vh - 500px)', overflowY:'auto' }}>
         {plans.length === 0 && (
-          <div style={{ textAlign:'center', padding:'24px', color:C.gray }}>
+          <div style={{ textAlign:'center', padding:'24px', color:T.textMuted }}>
             <Package size={28} style={{ marginBottom:8, opacity:0.4 }}/>
             <p style={{ fontSize:12 }}>No plans saved yet.</p>
           </div>
         )}
         {plans.map(plan => (
-          <div key={plan.id} style={{ background:C.card, border:`1px solid ${activePlan?.id===plan.id ? 'rgba(0,212,170,0.4)' : C.border}`, borderRadius:10, padding:'12px', cursor:'pointer', transition:'border-color 0.15s' }}
+          <div key={plan.id} style={{ background:T.bgCard, border:`1px solid ${activePlan?.id===plan.id ? 'rgba(0,212,170,0.4)' : T.border}`, borderRadius:10, padding:'12px', cursor:'pointer', transition:'border-color 0.15s' }}
             onClick={() => setActivePlan(activePlan?.id===plan.id ? null : plan)}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
               <div>
-                <div style={{ color:C.white, fontSize:12, fontWeight:700 }}>{plan.name}</div>
-                <div style={{ color:C.gray, fontSize:10 }}>{plan.iteration} · {new Date(plan.createdAt).toLocaleDateString()}</div>
+                <div style={{ color:T.text, fontSize:12, fontWeight:700 }}>{plan.name}</div>
+                <div style={{ color:T.textMuted, fontSize:10 }}>{plan.iteration} · {new Date(plan.createdAt).toLocaleDateString()}</div>
               </div>
               <div style={{ display:'flex', gap:4 }}>
-                <span style={{ background:`rgba(${plan.passed===plan.totalResults?'0,212,170':'248,113,113'},0.15)`, color: plan.passed===plan.totalResults ? C.teal : '#f87171', fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:20 }}>
+                <span style={{ background:`rgba(${plan.passed===plan.totalResults?'0,212,170':'248,113,113'},0.15)`, color: plan.passed===plan.totalResults ? T.accent : '#f87171', fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:20 }}>
                   {plan.passRate}%
                 </span>
               </div>
             </div>
-            <div style={{ display:'flex', gap:12, fontSize:11, color:C.gray }}>
+            <div style={{ display:'flex', gap:12, fontSize:11, color:T.textMuted }}>
               <span>🧪 {plan.totalTests} tests</span>
               <span style={{ color:'#4ade80' }}>✓ {plan.passed}</span>
               <span style={{ color:'#f87171' }}>✗ {plan.failed}</span>
             </div>
             {activePlan?.id === plan.id && (
-              <div style={{ marginTop:10, paddingTop:10, borderTop:`1px solid ${C.border}`, display:'flex', flexDirection:'column', gap:6 }}>
-                <button onClick={e=>{ e.stopPropagation(); downloadPlanScripts(plan); }} style={{ ...btnStyle(C.teal), justifyContent:'center' }}>
+              <div style={{ marginTop:10, paddingTop:10, borderTop:`1px solid ${T.border}`, display:'flex', flexDirection:'column', gap:6 }}>
+                <button onClick={e=>{ e.stopPropagation(); downloadPlanScripts(plan); }} style={{ ...btnStyle(T.accent), justifyContent:'center' }}>
                   <Terminal size={12}/> Download {plan.framework} Scripts
                 </button>
-                <button onClick={e=>{ e.stopPropagation(); downloadAllFrameworks(plan); }} style={{ ...btnStyle(C.blue), justifyContent:'center' }}>
+                <button onClick={e=>{ e.stopPropagation(); downloadAllFrameworks(plan); }} style={{ ...btnStyle(T.blue), justifyContent:'center' }}>
                   <Package size={12}/> Download All Frameworks (4 files)
                 </button>
               </div>
@@ -604,14 +624,14 @@ function TestCasesPanel({ tests, activeTab, setActiveTab, onDelete, onRun, isRun
 
   return (
     <PanelShell title={`Test Cases (${totalTests})`} action={
-      <button onClick={onRun} disabled={isRunning||!canRun} style={{ padding:'5px 12px', borderRadius:7, border:'none', cursor:'pointer', background:`linear-gradient(135deg,${C.teal},${C.blue})`, color:C.bg, fontSize:12, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
+      <button onClick={onRun} disabled={isRunning||!canRun} style={{ padding:'5px 12px', borderRadius:7, border:'none', cursor:'pointer', background:`linear-gradient(135deg,${T.accent},${T.blue})`, color:T.bg, fontSize:12, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
         <Play size={12}/> Run
       </button>
     }>
       {/* Type filter */}
       <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:10 }}>
         {['all',...TYPES].map(t => (
-          <button key={t} onClick={()=>setActiveTab(t)} style={{ padding:'3px 9px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, background: activeTab===t ? C.teal : 'rgba(255,255,255,0.06)', color: activeTab===t ? C.bg : C.gray, fontWeight: activeTab===t ? 700 : 400 }}>
+          <button key={t} onClick={()=>setActiveTab(t)} style={{ padding:'3px 9px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, background: activeTab===t ? T.accent : 'rgba(255,255,255,0.06)', color: activeTab===t ? T.bg : T.textMuted, fontWeight: activeTab===t ? 700 : 400 }}>
             {t==='all'?`All (${totalTests})`:`${t} (${(tests[t]||[]).length})`}
           </button>
         ))}
@@ -619,37 +639,37 @@ function TestCasesPanel({ tests, activeTab, setActiveTab, onDelete, onRun, isRun
 
       {/* Search */}
       <div style={{ position:'relative', marginBottom:10 }}>
-        <Search size={12} style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:C.gray }}/>
+        <Search size={12} style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:T.textMuted }}/>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
-          style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, color:C.white, fontSize:12, padding:'7px 10px 7px 28px', outline:'none', fontFamily:'inherit', boxSizing:'border-box' }}/>
+          style={{ width:'100%', background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:12, padding:'7px 10px 7px 28px', outline:'none', fontFamily:'inherit', boxSizing:'border-box' }}/>
       </div>
 
       {/* Script viewer modal */}
       {scripts && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
-          <div style={{ background:C.sidebar, border:`1px solid ${C.border}`, borderRadius:16, width:'90%', maxWidth:800, maxHeight:'85vh', display:'flex', flexDirection:'column', overflow:'hidden' }}>
-            <div style={{ padding:'14px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ background:T.sidebar, border:`1px solid ${T.border}`, borderRadius:16, width:'90%', maxWidth:800, maxHeight:'85vh', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+            <div style={{ padding:'14px 18px', borderBottom:`1px solid ${T.border}`, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div>
-                <div style={{ color:C.white, fontSize:14, fontWeight:700 }}>{scripts.test.id} — {scripts.fw} script</div>
-                <div style={{ color:C.gray, fontSize:11 }}>{scripts.test.name}</div>
+                <div style={{ color:T.text, fontSize:14, fontWeight:700 }}>{scripts.test.id} — {scripts.fw} script</div>
+                <div style={{ color:T.textMuted, fontSize:11 }}>{scripts.test.name}</div>
               </div>
               <div style={{ display:'flex', gap:8 }}>
-                <button onClick={() => navigator.clipboard?.writeText(scripts.code)} style={{ ...btnStyle(C.teal), padding:'5px 12px' }}><Copy size={11}/> Copy</button>
-                <button onClick={() => dl(scripts.code, `${(scripts.test.id||'tc').replace(/[^a-z0-9]/gi,'_')}.${scripts.fw==='jest'?'test.js':'spec.js'}`, 'text/javascript')} style={{ ...btnStyle(C.blue), padding:'5px 12px' }}><Download size={11}/> Download</button>
-                <button onClick={() => setScripts(null)} style={{ background:'none', border:'none', color:C.gray, cursor:'pointer' }}><X size={16}/></button>
+                <button onClick={() => navigator.clipboard?.writeText(scripts.code)} style={{ ...btnStyle(T.accent), padding:'5px 12px' }}><Copy size={11}/> Copy</button>
+                <button onClick={() => dl(scripts.code, `${(scripts.test.id||'tc').replace(/[^a-z0-9]/gi,'_')}.${scripts.fw==='jest'?'test.js':'spec.js'}`, 'text/javascript')} style={{ ...btnStyle(T.blue), padding:'5px 12px' }}><Download size={11}/> Download</button>
+                <button onClick={() => setScripts(null)} style={{ background:'none', border:'none', color:T.textMuted, cursor:'pointer' }}><X size={16}/></button>
               </div>
             </div>
-            <div style={{ display:'flex', gap:0, borderBottom:`1px solid ${C.border}` }}>
+            <div style={{ display:'flex', gap:0, borderBottom:`1px solid ${T.border}` }}>
               {['playwright','cypress','jest','k6'].map(fw => (
                 <button key={fw} onClick={() => setScripts({ ...scripts, fw, code: generateScript(scripts.test, fw) })} style={{
                   flex:1, padding:'8px', border:'none', cursor:'pointer', fontSize:11, fontWeight:600,
-                  background: scripts.fw===fw ? C.tealDim : 'transparent',
-                  color: scripts.fw===fw ? C.teal : C.gray,
-                  borderBottom: scripts.fw===fw ? `2px solid ${C.teal}` : '2px solid transparent',
+                  background: scripts.fw===fw ? T.accentDim : 'transparent',
+                  color: scripts.fw===fw ? T.accent : T.textMuted,
+                  borderBottom: scripts.fw===fw ? `2px solid ${T.accent}` : '2px solid transparent',
                 }}>{fw}</button>
               ))}
             </div>
-            <pre style={{ flex:1, overflow:'auto', padding:'16px', fontSize:11, lineHeight:1.7, color:'#a8d8b9', background:'#0a0f1e', margin:0, fontFamily:'monospace' }}>
+            <pre style={{ flex:1, overflow:'auto', padding:'16px', fontSize:11, lineHeight:1.7, color:'#a8d8b9', background:T.bg, margin:0, fontFamily:'monospace' }}>
               {scripts.code}
             </pre>
           </div>
@@ -659,37 +679,37 @@ function TestCasesPanel({ tests, activeTab, setActiveTab, onDelete, onRun, isRun
       {/* Test list */}
       <div style={{ display:'flex', flexDirection:'column', gap:3, maxHeight:'calc(100vh - 320px)', overflowY:'auto' }}>
         {shown.length === 0 ? (
-          <div style={{ textAlign:'center', padding:'32px', color:C.gray }}>
+          <div style={{ textAlign:'center', padding:'32px', color:T.textMuted }}>
             <Layers size={28} style={{ marginBottom:8, opacity:0.4 }}/>
             <p style={{ fontSize:12 }}>No tests match.</p>
           </div>
         ) : shown.map(test => (
-          <div key={test.id} style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
+          <div key={test.id} style={{ background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ display:'flex', alignItems:'center', padding:'8px 10px', gap:8, cursor:'pointer' }}
               onClick={()=>setExpanded(expanded===test.id?null:test.id)}>
               <div style={{ width:3, height:26, borderRadius:2, background:TYPE_COLORS[test.type], flexShrink:0 }}/>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ color:C.white, fontSize:12, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{test.name}</div>
-                <div style={{ color:C.gray, fontSize:10 }}>{test.id}</div>
+                <div style={{ color:T.text, fontSize:12, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{test.name}</div>
+                <div style={{ color:T.textMuted, fontSize:10 }}>{test.id}</div>
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-                <span style={{ fontSize:10, padding:'2px 5px', borderRadius:4, background: test.priority==='Critical'?'rgba(239,68,68,0.15)':'rgba(255,255,255,0.05)', color: test.priority==='Critical'?'#f87171':C.gray }}>{test.priority}</span>
+                <span style={{ fontSize:10, padding:'2px 5px', borderRadius:4, background: test.priority==='Critical'?'rgba(239,68,68,0.15)':'rgba(255,255,255,0.05)', color: test.priority==='Critical'?'#f87171':T.textMuted }}>{test.priority}</span>
                 <button onClick={e=>{ e.stopPropagation(); setScripts({ test, fw:'playwright', code: generateScript(test,'playwright') }); }}
-                  style={{ background:'none', border:'none', color:C.teal, cursor:'pointer', padding:2 }} title="View script"><Terminal size={11}/></button>
+                  style={{ background:'none', border:'none', color:T.accent, cursor:'pointer', padding:2 }} title="View script"><Terminal size={11}/></button>
                 <button onClick={e=>{ e.stopPropagation(); dl(generateScript(test,'playwright'), `${(test.id||'tc').replace(/[^a-z0-9]/gi,'_')}.spec.js`, 'text/javascript'); }}
-                  style={{ background:'none', border:'none', color:C.blue, cursor:'pointer', padding:2 }} title="Download script"><Download size={11}/></button>
+                  style={{ background:'none', border:'none', color:T.blue, cursor:'pointer', padding:2 }} title="Download script"><Download size={11}/></button>
                 <button onClick={e=>{ e.stopPropagation(); onDelete(test.type, test.id); }}
-                  style={{ background:'none', border:'none', color:C.gray, cursor:'pointer', padding:2 }}><Trash2 size={11}/></button>
-                {expanded===test.id ? <ChevronUp size={12} style={{ color:C.gray }}/> : <ChevronDown size={12} style={{ color:C.gray }}/>}
+                  style={{ background:'none', border:'none', color:T.textMuted, cursor:'pointer', padding:2 }}><Trash2 size={11}/></button>
+                {expanded===test.id ? <ChevronUp size={12} style={{ color:T.textMuted }}/> : <ChevronDown size={12} style={{ color:T.textMuted }}/>}
               </div>
             </div>
             {expanded===test.id && (
-              <div style={{ borderTop:`1px solid ${C.border}`, padding:'8px 10px', background:'rgba(0,0,0,0.2)' }}>
+              <div style={{ borderTop:`1px solid ${T.border}`, padding:'8px 10px', background:T.bgHover }}>
                 {[['Steps',test.testSteps],['Expected',test.expectedResult],['Preconditions',test.preconditions]]
                   .filter(([,v])=>v).map(([label,value])=>(
                   <div key={label} style={{ marginBottom:7 }}>
-                    <div style={{ color:C.gray, fontSize:10, fontWeight:600, textTransform:'uppercase', marginBottom:2 }}>{label}</div>
-                    <div style={{ color:C.grayLight, fontSize:11, lineHeight:1.6 }}>
+                    <div style={{ color:T.textMuted, fontSize:10, fontWeight:600, textTransform:'uppercase', marginBottom:2 }}>{label}</div>
+                    <div style={{ color:T.textSub, fontSize:11, lineHeight:1.6 }}>
                       {String(value).split(' | ').map((s,i)=><div key={i}>{s}</div>)}
                     </div>
                   </div>
@@ -810,17 +830,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; back
 
   return (
     <PanelShell title={`Results (${results.length})`} action={
-      <button onClick={downloadHTMLReport} disabled={!results.length} style={{ padding:'5px 10px', borderRadius:7, border:'none', cursor:'pointer', background:`rgba(0,212,170,0.1)`, color:C.teal, fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+      <button onClick={downloadHTMLReport} disabled={!results.length} style={{ padding:'5px 10px', borderRadius:7, border:'none', cursor:'pointer', background:`rgba(0,212,170,0.1)`, color:T.accent, fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
         <Download size={11}/> HTML
       </button>
     }>
       {/* Stats */}
       {results.length > 0 && (
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:10 }}>
-          {[{ label:'Passed', val:passed, color:'#4ade80' }, { label:'Failed', val:failed, color:'#f87171' }, { label:'Rate', val:`${results.length?Math.round(passed/results.length*100):0}%`, color:C.teal }].map(s=>(
-            <div key={s.label} style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:'8px', textAlign:'center' }}>
+          {[{ label:'Passed', val:passed, color:'#4ade80' }, { label:'Failed', val:failed, color:'#f87171' }, { label:'Rate', val:`${results.length?Math.round(passed/results.length*100):0}%`, color:T.accent }].map(s=>(
+            <div key={s.label} style={{ background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, padding:'8px', textAlign:'center' }}>
               <div style={{ color:s.color, fontWeight:800, fontSize:16, fontFamily:'monospace' }}>{s.val}</div>
-              <div style={{ color:C.gray, fontSize:10 }}>{s.label}</div>
+              <div style={{ color:T.textMuted, fontSize:10 }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -829,7 +849,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; back
       {/* Filter */}
       <div style={{ display:'flex', gap:4, marginBottom:10 }}>
         {['all','passed','failed'].map(f => (
-          <button key={f} onClick={()=>setFilter(f)} style={{ flex:1, padding:'5px', borderRadius:7, border:'none', cursor:'pointer', fontSize:11, background: filter===f ? C.teal : 'rgba(255,255,255,0.06)', color: filter===f ? C.bg : C.gray, fontWeight: filter===f ? 700 : 400 }}>
+          <button key={f} onClick={()=>setFilter(f)} style={{ flex:1, padding:'5px', borderRadius:7, border:'none', cursor:'pointer', fontSize:11, background: filter===f ? T.accent : 'rgba(255,255,255,0.06)', color: filter===f ? T.bg : T.textMuted, fontWeight: filter===f ? 700 : 400 }}>
             {f==='all'?`All (${results.length})`:f==='passed'?`✓ ${passed}`:`✗ ${failed}`}
           </button>
         ))}
@@ -838,7 +858,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; back
       {/* Results list */}
       <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:'calc(100vh - 380px)', overflowY:'auto' }}>
         {shown.length === 0 ? (
-          <div style={{ textAlign:'center', padding:'32px', color:C.gray }}><p style={{ fontSize:12 }}>No results yet. Run your tests.</p></div>
+          <div style={{ textAlign:'center', padding:'32px', color:T.textMuted }}><p style={{ fontSize:12 }}>No results yet. Run your tests.</p></div>
         ) : shown.map((r,i) => (
           <div key={i} style={{ background: r.status==='passed'?'rgba(74,222,128,0.05)':'rgba(248,113,113,0.05)', border:`1px solid ${r.status==='passed'?'rgba(74,222,128,0.2)':'rgba(248,113,113,0.2)'}`, borderRadius:8, overflow:'hidden' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', cursor:'pointer' }}
@@ -847,36 +867,36 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; back
                 ? <CheckCircle size={13} style={{ color:'#4ade80', flexShrink:0 }}/>
                 : <XCircle    size={13} style={{ color:'#f87171', flexShrink:0 }}/>}
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ color:C.white, fontSize:12, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</div>
-                <div style={{ color:C.gray, fontSize:10 }}>{r.duration}ms</div>
+                <div style={{ color:T.text, fontSize:12, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</div>
+                <div style={{ color:T.textMuted, fontSize:10 }}>{r.duration}ms</div>
               </div>
               <div style={{ display:'flex', gap:4 }}>
                 {r.screenshot && (
                   <button onClick={e=>{e.stopPropagation(); dlScreenshot(r.screenshot, r.name);}}
-                    style={{ background:'none', border:'none', color:C.teal, cursor:'pointer', padding:2 }} title="Download screenshot">
+                    style={{ background:'none', border:'none', color:T.accent, cursor:'pointer', padding:2 }} title="Download screenshot">
                     <Image size={11}/>
                   </button>
                 )}
                 {r.status==='failed' && <>
                   <button onClick={e=>{e.stopPropagation(); onReportBug(r);}} style={{ background:'none', border:'none', color:'#f87171', cursor:'pointer', padding:2 }} title="Report bug"><Bug size={11}/></button>
-                  <button onClick={e=>{e.stopPropagation(); onRetest(r);}} style={{ background:'none', border:'none', color:C.blue, cursor:'pointer', padding:2 }} title="Retest"><RotateCcw size={11}/></button>
+                  <button onClick={e=>{e.stopPropagation(); onRetest(r);}} style={{ background:'none', border:'none', color:T.blue, cursor:'pointer', padding:2 }} title="Retest"><RotateCcw size={11}/></button>
                 </>}
               </div>
             </div>
             {expanded===i && (
-              <div style={{ borderTop:`1px solid rgba(255,255,255,0.06)`, padding:'8px 10px', background:'rgba(0,0,0,0.2)' }}>
+              <div style={{ borderTop:`1px solid rgba(255,255,255,0.06)`, padding:'8px 10px', background:T.bgHover }}>
                 {r.error && <div style={{ color:'#f87171', fontSize:11, marginBottom:8, background:'rgba(248,113,113,0.1)', padding:'6px 8px', borderRadius:6 }}>{r.error}</div>}
                 {r.screenshot && (
                   <div>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-                      <span style={{ color:C.gray, fontSize:10, fontWeight:600, textTransform:'uppercase' }}>Screenshot</span>
-                      <button onClick={()=>dlScreenshot(r.screenshot,r.name)} style={{ ...btnStyle(C.teal), padding:'3px 8px', fontSize:10 }}>
+                      <span style={{ color:T.textMuted, fontSize:10, fontWeight:600, textTransform:'uppercase' }}>Screenshot</span>
+                      <button onClick={()=>dlScreenshot(r.screenshot,r.name)} style={{ ...btnStyle(T.accent), padding:'3px 8px', fontSize:10 }}>
                         <Download size={10}/> Save PNG
                       </button>
                     </div>
-                    <img src={r.screenshot} alt={r.name} style={{ width:'100%', borderRadius:6, border:`1px solid ${C.border}`, cursor:'pointer' }}
+                    <img src={r.screenshot} alt={r.name} style={{ width:'100%', borderRadius:6, border:`1px solid ${T.border}`, cursor:'pointer' }}
                       onClick={()=>window.open(r.screenshot,'_blank')}/>
-                    <div style={{ color:C.gray, fontSize:10, marginTop:3 }}>Click to open full size</div>
+                    <div style={{ color:T.textMuted, fontSize:10, marginTop:3 }}>Click to open full size</div>
                   </div>
                 )}
               </div>
@@ -911,7 +931,7 @@ function CreateTestPanel({ onAdd }) {
 
   return (
     <PanelShell title="Create Test Case" action={
-      <button onClick={handle} style={{ padding:'5px 12px', borderRadius:7, border:'none', cursor:'pointer', background:`linear-gradient(135deg,${C.teal},${C.blue})`, color:C.bg, fontSize:12, fontWeight:700 }}>+ Add</button>
+      <button onClick={handle} style={{ padding:'5px 12px', borderRadius:7, border:'none', cursor:'pointer', background:`linear-gradient(135deg,${T.accent},${T.blue})`, color:T.bg, fontSize:12, fontWeight:700 }}>+ Add</button>
     }>
       <div style={{ display:'flex', flexDirection:'column', gap:9, overflowY:'auto', maxHeight:'calc(100vh - 190px)' }}>
         {/* Type */}
@@ -919,7 +939,7 @@ function CreateTestPanel({ onAdd }) {
           <label style={lbl}>Test Type</label>
           <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
             {TYPES.map(t => (
-              <button key={t} onClick={()=>setType(t)} style={{ padding:'4px 10px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, background: type===t?C.teal:'rgba(255,255,255,0.06)', color: type===t?C.bg:C.gray, fontWeight: type===t?700:400 }}>{t}</button>
+              <button key={t} onClick={()=>setType(t)} style={{ padding:'4px 10px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, background: type===t?T.accent:'rgba(255,255,255,0.06)', color: type===t?T.bg:T.textMuted, fontWeight: type===t?700:400 }}>{t}</button>
             ))}
           </div>
         </div>
@@ -954,15 +974,15 @@ function CreateTestPanel({ onAdd }) {
           <label style={lbl}>Script Framework</label>
           <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:8 }}>
             {['playwright','cypress','jest','k6'].map(f => (
-              <button key={f} onClick={()=>setFw(f)} style={{ padding:'3px 9px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, background: fw===f?C.blue:'rgba(255,255,255,0.06)', color: fw===f?C.white:C.gray }}>{f}</button>
+              <button key={f} onClick={()=>setFw(f)} style={{ padding:'3px 9px', borderRadius:20, border:'none', cursor:'pointer', fontSize:11, background: fw===f?T.blue:'rgba(255,255,255,0.06)', color: fw===f?T.text:T.textMuted }}>{f}</button>
             ))}
           </div>
-          <button onClick={preview} disabled={!data.name} style={{ ...btnStyle(C.blue), width:'100%', justifyContent:'center', opacity: data.name?1:0.5 }}>
+          <button onClick={preview} disabled={!data.name} style={{ ...btnStyle(T.blue), width:'100%', justifyContent:'center', opacity: data.name?1:0.5 }}>
             <Terminal size={12}/> Download {fw} script
           </button>
         </div>
 
-        <button onClick={handle} style={{ padding:'11px', borderRadius:9, border:'none', cursor:'pointer', background:`linear-gradient(135deg,${C.teal},${C.blue})`, color:C.bg, fontSize:14, fontWeight:700 }}>
+        <button onClick={handle} style={{ padding:'11px', borderRadius:9, border:'none', cursor:'pointer', background:`linear-gradient(135deg,${T.accent},${T.blue})`, color:T.bg, fontSize:14, fontWeight:700 }}>
           + Add Test Case
         </button>
       </div>
@@ -1022,43 +1042,43 @@ function TemplatePanel({ onAdd }) {
   return (
     <PanelShell title="Templates & Import">
       <div style={{ display:'flex', flexDirection:'column', gap:12, overflowY:'auto', maxHeight:'calc(100vh - 180px)' }}>
-        <button onClick={dlTemplate} style={{ ...btnStyle(C.teal), justifyContent:'center', padding:'9px' }}>
+        <button onClick={dlTemplate} style={{ ...btnStyle(T.accent), justifyContent:'center', padding:'9px' }}>
           <Download size={13}/> Download CSV Template
         </button>
 
         {/* Drop zone */}
         <div onDragOver={e=>{e.preventDefault();setOver(true);}} onDragLeave={()=>setOver(false)} onDrop={e=>{e.preventDefault();setOver(false);const f=e.dataTransfer.files[0];if(f)handleFile(f);}}
-          style={{ border:`2px dashed ${over?C.teal:C.border}`, borderRadius:12, padding:'28px', textAlign:'center', background:over?'rgba(0,212,170,0.05)':'transparent', transition:'all 0.2s' }}>
-          <FileUp size={24} style={{ color:over?C.teal:C.gray, marginBottom:8 }}/>
-          <p style={{ color:C.grayLight, fontSize:13, marginBottom:6 }}>Drag & drop CSV</p>
+          style={{ border:`2px dashed ${over?T.accent:T.border}`, borderRadius:12, padding:'28px', textAlign:'center', background:over?'rgba(0,212,170,0.05)':'transparent', transition:'all 0.2s' }}>
+          <FileUp size={24} style={{ color:over?T.accent:T.textMuted, marginBottom:8 }}/>
+          <p style={{ color:T.textSub, fontSize:13, marginBottom:6 }}>Drag & drop CSV</p>
           <label style={{ cursor:'pointer' }}>
-            <span style={{ color:C.teal, fontSize:12, fontWeight:600, border:`1px solid ${C.border}`, padding:'5px 14px', borderRadius:7, background:'rgba(0,212,170,0.08)' }}>Browse</span>
+            <span style={{ color:T.accent, fontSize:12, fontWeight:600, border:`1px solid ${T.border}`, padding:'5px 14px', borderRadius:7, background:'rgba(0,212,170,0.08)' }}>Browse</span>
             <input type="file" accept=".csv,.txt" style={{ display:'none' }} onChange={e=>{if(e.target.files[0])handleFile(e.target.files[0]);e.target.value='';}}/>
           </label>
         </div>
 
         {imported > 0 && (
           <div style={{ background:'rgba(0,212,170,0.08)', border:`1px solid rgba(0,212,170,0.25)`, borderRadius:8, padding:'9px 12px', display:'flex', alignItems:'center', gap:8 }}>
-            <CheckCircle size={14} style={{ color:C.teal }}/>
-            <span style={{ color:C.teal, fontSize:12, fontWeight:600 }}>{imported} test cases imported!</span>
+            <CheckCircle size={14} style={{ color:T.accent }}/>
+            <span style={{ color:T.accent, fontSize:12, fontWeight:600 }}>{imported} test cases imported!</span>
           </div>
         )}
 
-        <div style={{ color:C.gray, fontSize:11, fontWeight:600, textTransform:'uppercase' }}>Quick Presets</div>
+        <div style={{ color:T.textMuted, fontSize:11, fontWeight:600, textTransform:'uppercase' }}>Quick Presets</div>
         {presets.map(p => (
           <button key={p.label} onClick={()=>{
             Array.from({length:p.count}).forEach((_,i)=>{
               onAdd(p.type,{ id:`PRESET-${p.type.toUpperCase()}-${Date.now()}-${i}`, name:`${p.label} — Test ${i+1}`, description:p.desc, priority:'High', testSteps:'Follow test procedure', expectedResult:'Test passes' });
             });
             setImported(x=>x+p.count);
-          }} style={{ width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:'10px 12px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', justifyContent:'space-between', transition:'border-color 0.15s' }}
+          }} style={{ width:'100%', background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, padding:'10px 12px', cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', justifyContent:'space-between', transition:'border-color 0.15s' }}
           onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(0,212,170,0.35)'}
-          onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+          onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}>
             <div>
-              <div style={{ color:C.white, fontSize:12, fontWeight:600 }}>{p.label}</div>
-              <div style={{ color:C.gray, fontSize:11 }}>{p.desc}</div>
+              <div style={{ color:T.text, fontSize:12, fontWeight:600 }}>{p.label}</div>
+              <div style={{ color:T.textMuted, fontSize:11 }}>{p.desc}</div>
             </div>
-            <span style={{ color:C.teal, fontSize:11, fontWeight:700, background:'rgba(0,212,170,0.1)', padding:'2px 8px', borderRadius:20 }}>+{p.count}</span>
+            <span style={{ color:T.accent, fontSize:11, fontWeight:700, background:'rgba(0,212,170,0.1)', padding:'2px 8px', borderRadius:20 }}>+{p.count}</span>
           </button>
         ))}
       </div>
@@ -1081,17 +1101,17 @@ function IntegrationsPanel({ onJiraImport, onJiraExport, onImport }) {
           { icon:'📊', name:'CSV / Excel', desc:'Bulk import from spreadsheet',
             actions:[{ label:'Import CSV', fn:onImport }] },
         ].map(int => (
-          <div key={int.name} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:'14px' }}>
+          <div key={int.name} style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, padding:'14px' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
               <span style={{ fontSize:18 }}>{int.icon}</span>
               <div>
-                <div style={{ color:C.white, fontSize:13, fontWeight:600 }}>{int.name}</div>
-                <div style={{ color:C.gray, fontSize:11 }}>{int.desc}</div>
+                <div style={{ color:T.text, fontSize:13, fontWeight:600 }}>{int.name}</div>
+                <div style={{ color:T.textMuted, fontSize:11 }}>{int.desc}</div>
               </div>
             </div>
             <div style={{ display:'flex', gap:6 }}>
               {int.actions.map(a => (
-                <button key={a.label} onClick={a.fn} style={{ ...btnStyle(C.teal), flex:1, justifyContent:'center' }}>{a.label}</button>
+                <button key={a.label} onClick={a.fn} style={{ ...btnStyle(T.accent), flex:1, justifyContent:'center' }}>{a.label}</button>
               ))}
             </div>
           </div>
@@ -1104,11 +1124,11 @@ function IntegrationsPanel({ onJiraImport, onJiraExport, onImport }) {
 // ─────────────────────────────────────────────────────────────
 // SHARED PANEL SHELL
 // ─────────────────────────────────────────────────────────────
-function PanelShell({ title, children, action }) {
+function PanelShell({ title, children, action }) {  // uses T from parent
   return (
-    <div style={{ width:340, flexShrink:0, background:C.panel, borderLeft:`1px solid ${C.border}`, height:'100vh', display:'flex', flexDirection:'column', position:'sticky', top:0 }}>
-      <div style={{ padding:'14px 14px 10px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-        <h2 style={{ color:C.white, fontSize:13, fontWeight:700 }}>{title}</h2>
+    <div style={{ width:340, flexShrink:0, background:T.bgAlt, borderLeft:`1px solid ${T.border}`, height:'100vh', display:'flex', flexDirection:'column', position:'sticky', top:0 }}>
+      <div style={{ padding:'14px 14px 10px', borderBottom:`1px solid ${T.border}`, display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+        <h2 style={{ color:T.text, fontSize:13, fontWeight:700 }}>{title}</h2>
         {action}
       </div>
       <div style={{ flex:1, overflowY:'auto', padding:'10px 12px' }}>{children}</div>
@@ -1124,13 +1144,14 @@ const btnStyle = (color) => ({
   border:`1px solid ${color}22`, background:`${color}18`,
   color, fontSize:12, fontWeight:600, cursor:'pointer', transition:'all 0.15s',
 });
-const lbl = { display:'block', color:C.gray, fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4 };
-const inp = { width:'100%', background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, color:C.white, fontSize:12, padding:'8px 10px', fontFamily:'inherit', outline:'none', resize:'vertical', boxSizing:'border-box' };
+const lbl = { display:'block', color:T.textMuted, fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4 };
+const inp = { width:'100%', background:T.bg, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:12, padding:'8px 10px', fontFamily:'inherit', outline:'none', resize:'vertical', boxSizing:'border-box' };
 
 // ─────────────────────────────────────────────────────────────
 // MAIN EXPORT
 // ─────────────────────────────────────────────────────────────
 export default function AppShell({
+  theme = 'light', setTheme,
   userProfile, userPlan, freeRunsLeft, isAuthenticated,
   onLogout, onUpgrade, onReports,
   tests, results, bugs, activeTab, setActiveTab,
@@ -1141,19 +1162,37 @@ export default function AppShell({
   showAds,
 }) {
   const [activePanel, setActivePanel] = useState('analyze');
+  const T = getTheme(theme);
+
+  // Override C with theme tokens
+  const TC = {
+    bg:       T.bg,
+    sidebar:  T.sidebar,
+    panel:    T.bgAlt,
+    card:     T.bgCard,
+    border:   T.border,
+    teal:     T.accent,
+    tealDim:  T.accentDim,
+    blue:     T.blue,
+    white:    T.text,
+    gray:     T.textSub,
+    grayLight:T.textSub,
+  };
 
   return (
-    <div style={{ display:'flex', minHeight:'100vh', background:C.bg, fontFamily:"-apple-system, BlinkMacSystemFont, 'Inter', sans-serif", color:C.white }}>
-      <style>{`*{box-sizing:border-box;margin:0;padding:0;} input::placeholder,textarea::placeholder{color:${C.gray};} ::-webkit-scrollbar{width:4px;height:4px;} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px;}`}</style>
+    <div style={{ display:'flex', minHeight:'100vh', background:T.bg, fontFamily:"-apple-system, BlinkMacSystemFont, 'Inter', sans-serif", color:T.text }}>
+      <style>{`*{box-sizing:border-box;margin:0;padding:0;} input::placeholder,textarea::placeholder{color:${T.textMuted};} ::-webkit-scrollbar{width:4px;height:4px;} ::-webkit-scrollbar-thumb{background:${T.border};border-radius:3px;} select option{background:${T.bgCard};color:${T.text};}`}</style>
 
       <Sidebar
         active={activePanel} setActive={setActivePanel}
         userProfile={userProfile} userPlan={userPlan}
         onLogout={onLogout} onUpgrade={onUpgrade} onReports={onReports}
         totalTests={totalTests} results={results}
+        T={T} theme={theme} setTheme={setTheme}
       />
 
       <AnalyzeHero
+        T={T}
         onAnalyze={onAnalyze} isGenerating={isGenerating} progress={progress} progressMsg={progressMsg}
         totalTests={totalTests} setActive={setActivePanel}
         activeTab={activeTab} setActiveTab={setActiveTab}

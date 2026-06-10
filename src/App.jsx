@@ -24,6 +24,7 @@ import { GoogleAdUnit, AdSenseScript } from './components/ads/GoogleAdUnit';
 
 // ── Config ────────────────────────────────────────────────────
 import { PLANS } from './config/services';
+import { DEFAULT_THEME } from './lib/theme';
 
 // ── Modals ────────────────────────────────────────────────────
 import AuthModal    from './components/modals/AuthModal';
@@ -73,6 +74,15 @@ export default function App() {
   const [selectedPlan, setSelectedPlan]       = useState(null);
 
   const showAds = PLANS[userPlan]?.showAds ?? true;
+
+  // ── Theme ─────────────────────────────────────────────────
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('testitnow_theme') || DEFAULT_THEME; } catch { return DEFAULT_THEME; }
+  });
+  const handleSetTheme = (t) => {
+    setTheme(t);
+    try { localStorage.setItem('testitnow_theme', t); } catch {}
+  };
 
   // ── Page view ────────────────────────────────────────────
   // 'landing' | 'main' | 'reports'
@@ -318,6 +328,8 @@ export default function App() {
             setAuthMode('login');
             setModal('auth');
           }}
+          theme={theme}
+          setTheme={handleSetTheme}
         />
       )}
 
@@ -334,6 +346,8 @@ export default function App() {
       {/* ── MAIN APP (AppShell) ── */}
       {currentView === 'main' && (
         <AppShell
+          theme={theme}
+          setTheme={handleSetTheme}
           userProfile={userProfile}
           userPlan={userPlan}
           freeRunsLeft={freeRunsLeft}
