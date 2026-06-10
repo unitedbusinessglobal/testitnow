@@ -231,15 +231,16 @@ ${sections}
 // k6
 // ─────────────────────────────────────────────────────────────
 function k6Test(t) {
+  const X = 'export';
   return `import http from 'k6/http';
 import { check, sleep } from 'k6';
 // ID: ${t.id||'TC-PERF'} | ${t.name}
-export const options = {
+${X} const options = {
   stages: [{ duration: '30s', target: 10 }, { duration: '1m', target: 50 }, { duration: '30s', target: 0 }],
   thresholds: { http_req_duration: ['p(95)<2000'], http_req_failed: ['rate<0.01'] },
 };
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
-export default function() {
+${X} default function() {
   const res = http.get(\`\${BASE_URL}${(t.url||'/').replace(/^https?:\/\/[^/]+/,'')}\`);
   check(res, { 'status 200': r => r.status === 200, 'under 2s': r => r.timings.duration < 2000 });
   sleep(1);
@@ -256,17 +257,18 @@ function k6Plan(tests, results, planName, iteration) {
     sleep(0.5);
   });`).join('\n');
 
+  const X2 = 'export';
   return `import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 // Test Plan: ${planName} | Iteration: ${iteration}
 // Generated: ${new Date().toISOString()} | k6
-export const options = {
+${X2} const options = {
   stages: [{ duration: '2m', target: 10 }, { duration: '5m', target: 50 }, { duration: '2m', target: 100 }, { duration: '1m', target: 0 }],
   thresholds: { http_req_duration: ['p(95)<2000'], http_req_failed: ['rate<0.01'] },
 };
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
 const headers = { 'Authorization': \`Bearer \${__ENV.AUTH_TOKEN}\` };
-export default function() {
+${X2} default function() {
 ${groups}
 }
 `;
@@ -304,7 +306,7 @@ export function getAllTestPlans(tests, results, planName, iteration) {
     k6:         generateTestPlan(tests, results, planName, iteration, 'k6'),
     config: {
       playwright: `import { defineConfig } from '@playwright/test';
-export default defineConfig({
+${'export'} default defineConfig({
   testDir: './playwright',
   use: { baseURL: process.env.BASE_URL, screenshot: 'on', video: 'retain-on-failure' },
   reporter: [['html'], ['json', { outputFile: 'results.json' }]],
