@@ -1,870 +1,887 @@
 // ============================================================
-// ReportsPage.jsx — Full reports & downloads page
-// Formats: Excel (CSV), PDF, Word (DOCX-style HTML), XML
-// All generation happens in the browser — no server needed
+// ReportsPage.jsx — Full reports with all formats working
+// Fixed: steps column, HTML report, screenshots, all downloads
 // ============================================================
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Download, FileSpreadsheet, FileText, FileCode, File,
   CheckCircle, XCircle, Clock, AlertTriangle, Filter,
   ChevronDown, ChevronUp, ArrowLeft, Bug, BarChart2,
-  Printer, Eye, Search,
+  Eye, Search, Upload, Settings, X, Plus, Image,
+  Printer, RefreshCw,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
-// DOWNLOAD HELPERS
+// CORE DOWNLOAD HELPER — reliable cross-browser
 // ─────────────────────────────────────────────────────────────
-
-function triggerDownload(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const url  = URL.createObjectURL(blob);
-  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+function dl(content, filename, mime = 'text/plain;charset=utf-8') {
+  try {
+    const blob = new Blob([content], { type: mime });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 400);
+  } catch(e) { console.error('Download failed:', e); alert('Download failed: ' + e.message); }
 }
 
-// ── CSV / Excel ───────────────────────────────────────────────
+function dlScreenshot(dataUrl, name) {
+  if (!dataUrl) return;
+  const a = document.createElement('a');
+  a.href     = dataUrl;
+  a.download = (name||'screenshot').replace(/[^a-z0-9]/gi,'_') + '.png';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => document.body.removeChild(a), 400);
+}
+
+// ─────────────────────────────────────────────────────────────
+// CSV BUILDER
+// ─────────────────────────────────────────────────────────────
 function toCSV(rows) {
-  return '\uFEFF' + rows.map(r =>
-    r.map(c => {
-      const s = String(c ?? '');
-      return s.includes(',') || s.includes('"') || s.includes('\n')
-        ? `"${s.replace(/"/g, '""')}"` : s;
+  return '\uFEFF' + rows.map(row =>
+    row.map(cell => {
+      const s = String(cell ?? '').replace(/\r?\n/g,' ');
+      return (s.includes(',') || s.includes('"') || s.includes('\n'))
+        ? `"${s.replace(/"/g,'""')}"` : s;
     }).join(',')
   ).join('\r\n');
 }
 
-function downloadExcel(tests, results, bugs) {
-  // Sheet 1 — Test Cases
-  const tcRows = [
-    ['TestItNow — Test Cases Report'],
-    [`Generated: ${new Date().toLocaleString()}`],
-    [],
-    ['Test ID','Title','Type','Priority','Status','Description','Preconditions','Test Steps','Expected Result'],
-  ];
-  Object.entries(tests).forEach(([type, list]) =>
-    list.forEach(t => tcRows.push([
-      t.id || '', t.name || '', type.toUpperCase(), t.priority || 'Medium',
-      t.status || 'Draft', t.description || '', t.preconditions || '',
-      t.testSteps || '', t.expectedResult || '',
-    ]))
-  );
-  triggerDownload(toCSV(tcRows), 'TestItNow_TestCases.csv', 'text/csv;charset=utf-8');
+// ─────────────────────────────────────────────────────────────
+// ALL COLUMNS DEFINITION (with steps as separate column)
+// ─────────────────────────────────────────────────────────────
+const TC_COLS = [
+  { key:'id',             label:'Test ID' },
+  { key:'name',           label:'Title' },
+  { key:'type',           label:'Type' },
+  { key:'priority',       label:'Priority' },
+  { key:'status',         label:'Status' },
+  { key:'description',    label:'Description' },
+  { key:'preconditions',  label:'Preconditions' },
+  { key:'testSteps',      label:'Test Steps' },        // ← separate column
+  { key:'testData',       label:'Test Data' },
+  { key:'expectedResult', label:'Expected Result' },
+  { key:'url',            label:'URL' },
+];
 
-  // Sheet 2 — Results (separate file)
-  if (results.length) {
-    const resRows = [
-      ['TestItNow — Test Results Report'],
-      [`Generated: ${new Date().toLocaleString()}`],
-      [],
-      ['Test ID','Test Name','Type','Status','Duration (ms)','Timestamp','Error Message'],
-    ];
-    results.forEach(r => resRows.push([
-      r.id || '', r.name || '', r.type || '',
-      (r.status || '').toUpperCase(), r.duration || 0,
-      r.timestamp ? new Date(r.timestamp).toLocaleString() : '',
-      r.error || '',
-    ]));
-    setTimeout(() => triggerDownload(toCSV(resRows), 'TestItNow_Results.csv', 'text/csv;charset=utf-8'), 300);
-  }
+const RES_COLS = [
+  { key:'id',        label:'Test ID' },
+  { key:'name',      label:'Test Name' },
+  { key:'type',      label:'Type' },
+  { key:'status',    label:'Status' },
+  { key:'duration',  label:'Duration (ms)' },
+  { key:'timestamp', label:'Timestamp' },
+  { key:'error',     label:'Error Message' },
+  { key:'isRetest',  label:'Is Retest' },
+];
 
-  // Sheet 3 — Bugs
-  if (bugs.length) {
-    const bugRows = [
-      ['TestItNow — Bug Reports'],
-      [`Generated: ${new Date().toLocaleString()}`],
-      [],
-      ['Bug Key','Summary','Severity','Priority','Status','Created At','Description'],
-    ];
-    bugs.forEach(b => bugRows.push([
-      b.jiraKey || '', b.summary || '', b.severity || '', b.priority || '',
-      b.status || '', b.createdAt ? new Date(b.createdAt).toLocaleString() : '',
-      b.description || '',
-    ]));
-    setTimeout(() => triggerDownload(toCSV(bugRows), 'TestItNow_Bugs.csv', 'text/csv;charset=utf-8'), 600);
+const TYPES = ['ui','api','security','performance','database','unit'];
+const TYPE_COLORS = { ui:'#3b82f6', api:'#00d4aa', security:'#f59e0b', performance:'#a78bfa', database:'#34d399', unit:'#fb7185' };
+
+// ─────────────────────────────────────────────────────────────
+// GET VALUE FROM TEST OBJECT
+// ─────────────────────────────────────────────────────────────
+function getTestVal(t, key) {
+  if (key === 'type')      return (t.type||'').toUpperCase();
+  if (key === 'status')    return t.status || 'Draft';
+  if (key === 'testSteps') {
+    // Always show steps clearly — split by pipe
+    const raw = t.testSteps || t.test_steps || '';
+    return String(raw).split(' | ').filter(Boolean).join('\n');
   }
+  return t[key] ?? '';
 }
 
-// ── PDF (via browser print) ───────────────────────────────────
-function downloadPDF(tests, results, bugs, filter) {
-  const allTests = Object.entries(tests).flatMap(([type, list]) =>
-    list.map(t => ({ ...t, type }))
-  ).filter(t => !filter.type || t.type === filter.type)
-   .filter(t => !filter.priority || t.priority === filter.priority)
-   .filter(t => !filter.status || t.status === filter.status);
+function getResVal(r, key) {
+  if (key === 'status')    return (r.status||'').toUpperCase();
+  if (key === 'timestamp') return r.timestamp ? new Date(r.timestamp).toLocaleString() : '';
+  if (key === 'isRetest')  return r.isRetest ? 'Yes' : 'No';
+  return r[key] ?? '';
+}
 
-  const passRate = results.length
-    ? Math.round((results.filter(r => r.status === 'passed').length / results.length) * 100)
-    : 0;
+// ─────────────────────────────────────────────────────────────
+// DOWNLOAD FUNCTIONS
+// ─────────────────────────────────────────────────────────────
+
+// ── CSV / Excel ───────────────────────────────────────────────
+function downloadCSV_TC(tests, selectedCols, filter) {
+  const allTests = Object.entries(tests).flatMap(([type,list]) => list.map(t=>({...t,type})));
+  const filtered = applyFilter(allTests, filter);
+  const cols     = selectedCols.length ? selectedCols : TC_COLS.map(c=>c.key);
+  const colDefs  = TC_COLS.filter(c => cols.includes(c.key));
+
+  const rows = [
+    ['TestItNow — Test Cases Report'],
+    ['Generated: ' + new Date().toLocaleString()],
+    ['Total: ' + filtered.length],
+    [],
+    colDefs.map(c=>c.label),
+    ...filtered.map(t => colDefs.map(c => getTestVal(t, c.key))),
+  ];
+  dl(toCSV(rows), 'TestItNow_TestCases.csv', 'text/csv;charset=utf-8');
+}
+
+function downloadCSV_Results(results, selectedCols, filter) {
+  if (!results.length) { alert('No results to export.'); return; }
+  const filtered = applyResFilter(results, filter);
+  const cols     = selectedCols.length ? selectedCols : RES_COLS.map(c=>c.key);
+  const colDefs  = RES_COLS.filter(c => cols.includes(c.key));
+
+  const rows = [
+    ['TestItNow — Test Results Report'],
+    ['Generated: ' + new Date().toLocaleString()],
+    [],
+    colDefs.map(c=>c.label),
+    ...filtered.map(r => colDefs.map(c => getResVal(r, c.key))),
+  ];
+  dl(toCSV(rows), 'TestItNow_Results.csv', 'text/csv;charset=utf-8');
+}
+
+function downloadCSV_Bugs(bugs) {
+  if (!bugs.length) { alert('No bugs to export.'); return; }
+  const rows = [
+    ['TestItNow — Bug Reports'],
+    ['Generated: ' + new Date().toLocaleString()],
+    [],
+    ['Bug Key','Summary','Severity','Priority','Status','Created At','Description'],
+    ...bugs.map(b => [b.jiraKey||'', b.summary||'', b.severity||'', b.priority||'', b.status||'', b.createdAt ? new Date(b.createdAt).toLocaleString() : '', b.description||'']),
+  ];
+  dl(toCSV(rows), 'TestItNow_Bugs.csv', 'text/csv;charset=utf-8');
+}
+
+// ── PDF (print dialog) ────────────────────────────────────────
+function downloadPDF(tests, results, bugs, selectedCols, filter) {
+  const allTests = applyFilter(Object.entries(tests).flatMap(([type,list])=>list.map(t=>({...t,type}))), filter);
+  const cols     = selectedCols.length ? selectedCols : ['id','name','type','priority','testSteps','expectedResult'];
+  const colDefs  = TC_COLS.filter(c => cols.includes(c.key));
+  const passed   = results.filter(r=>r.status==='passed').length;
+  const passRate = results.length ? Math.round(passed/results.length*100) : 0;
+
+  const pColor = p => ({ Critical:'#dc2626', High:'#ea580c', Medium:'#ca8a04', Low:'#16a34a' }[p] || '#475569');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TestItNow Report</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;font-size:10px;color:#1e293b;padding:16px}
+h1{font-size:18px;color:#1e3a5f;border-bottom:3px solid #3b82f6;padding-bottom:6px;margin-bottom:12px}
+h2{font-size:13px;color:#1e3a5f;margin:16px 0 6px;border-left:4px solid #3b82f6;padding-left:6px}
+.sum{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.sc{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:5px;padding:8px 14px;text-align:center}
+.sc .v{font-size:18px;font-weight:bold;color:#1e3a5f}.sc .l{font-size:9px;color:#64748b;text-transform:uppercase}
+table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:9px;page-break-inside:auto}
+th{background:#1e3a5f;color:#fff;padding:4px 6px;text-align:left;font-size:9px}
+td{padding:3px 6px;border-bottom:1px solid #e2e8f0;vertical-align:top;max-width:160px;word-break:break-word;white-space:pre-wrap}
+tr:nth-child(even) td{background:#f8fafc}
+.b{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:bold}
+@media print{@page{margin:0.8cm}tr{page-break-inside:avoid}}
+</style></head><body>
+<h1>🧪 TestItNow Report</h1>
+<p style="color:#64748b;margin-bottom:10px">Generated: ${new Date().toLocaleString()}</p>
+<div class="sum">
+${[['Total Tests',allTests.length,'#1e3a5f'],['Passed',passed,'#16a34a'],['Failed',results.filter(r=>r.status==='failed').length,'#dc2626'],['Pass Rate',passRate+'%','#2563eb'],['Bugs',bugs.length,'#7c3aed']]
+  .map(([l,v,c])=>`<div class="sc"><div class="v" style="color:${c}">${v}</div><div class="l">${l}</div></div>`).join('')}
+</div>
+<h2>Test Cases (${allTests.length}) — includes Test Steps</h2>
+<table><thead><tr>${colDefs.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead>
+<tbody>${allTests.map(t=>`<tr>${colDefs.map(c=>{
+  const v = getTestVal(t, c.key);
+  if (c.key==='priority') return `<td><span class="b" style="background:${pColor(v)}22;color:${pColor(v)}">${v}</span></td>`;
+  return `<td>${String(v).substring(0,200)}</td>`;
+}).join('')}</tr>`).join('')}</tbody></table>
+${results.length ? `<h2>Results (${results.length})</h2>
+<table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Duration</th><th>Error</th></tr></thead>
+<tbody>${results.map(r=>`<tr><td style="font-family:monospace">${r.id||''}</td><td>${(r.name||'').substring(0,50)}</td>
+<td style="color:${r.status==='passed'?'#16a34a':'#dc2626'};font-weight:bold">${(r.status||'').toUpperCase()}</td>
+<td>${r.duration||0}ms</td><td style="color:#dc2626">${(r.error||'').substring(0,60)}</td></tr>`).join('')}</tbody></table>`:''}
+${bugs.length ? `<h2>Bugs (${bugs.length})</h2>
+<table><thead><tr><th>Key</th><th>Summary</th><th>Severity</th><th>Status</th></tr></thead>
+<tbody>${bugs.map(b=>`<tr><td>${b.jiraKey||''}</td><td>${b.summary||''}</td><td>${b.severity||''}</td><td>${b.status||''}</td></tr>`).join('')}</tbody></table>`:''}
+</body></html>`;
+
+  const win = window.open('', '_blank', 'width=1100,height=750,scrollbars=yes');
+  if (!win) { alert('Allow popups to open the PDF preview'); return; }
+  win.document.open(); win.document.write(html); win.document.close();
+  win.focus(); setTimeout(() => win.print(), 600);
+}
+
+// ── HTML Report with embedded screenshots ─────────────────────
+function downloadHTML(tests, results, bugs, selectedCols, filter) {
+  const allTests = applyFilter(Object.entries(tests).flatMap(([type,list])=>list.map(t=>({...t,type}))), filter);
+  const passed   = results.filter(r=>r.status==='passed').length;
+  const passRate = results.length ? Math.round(passed/results.length*100) : 0;
+  const cols     = selectedCols.length ? selectedCols : ['id','name','type','priority','testSteps','expectedResult'];
+  const colDefs  = TC_COLS.filter(c => cols.includes(c.key));
 
   const html = `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>TestItNow Report</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TestItNow — Full Report</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; padding: 20px; }
-  h1 { font-size: 22px; color: #1e3a5f; border-bottom: 3px solid #3b82f6; padding-bottom: 8px; margin-bottom: 16px; }
-  h2 { font-size: 15px; color: #1e3a5f; margin: 20px 0 8px; border-left: 4px solid #3b82f6; padding-left: 8px; }
-  .meta { display: flex; gap: 20px; margin-bottom: 16px; }
-  .meta-box { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 16px; text-align: center; }
-  .meta-box .val { font-size: 22px; font-weight: bold; color: #1e3a5f; }
-  .meta-box .lbl { font-size: 10px; color: #64748b; text-transform: uppercase; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 10px; }
-  th { background: #1e3a5f; color: white; padding: 6px 8px; text-align: left; font-size: 10px; }
-  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-  tr:nth-child(even) td { background: #f8fafc; }
-  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; }
-  .badge-critical { background: #fee2e2; color: #dc2626; }
-  .badge-high     { background: #ffedd5; color: #ea580c; }
-  .badge-medium   { background: #fef9c3; color: #ca8a04; }
-  .badge-low      { background: #dcfce7; color: #16a34a; }
-  .badge-passed   { background: #dcfce7; color: #16a34a; }
-  .badge-failed   { background: #fee2e2; color: #dc2626; }
-  .badge-draft    { background: #f1f5f9; color: #475569; }
-  .footer { text-align: center; color: #94a3b8; font-size: 9px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
-  @media print { body { padding: 10px; } @page { margin: 1cm; } }
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;background:#0a0f1e;color:#f0f4ff;line-height:1.5}
+.header{background:#0d1530;border-bottom:1px solid rgba(0,212,170,0.15);padding:16px 28px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:18px;font-weight:900}.logo span{color:#00d4aa}
+.gen{color:#6b7fa3;font-size:12px}
+.summary{display:flex;gap:12px;padding:20px 28px;flex-wrap:wrap;border-bottom:1px solid rgba(0,212,170,0.1)}
+.stat{background:#111b3a;border:1px solid rgba(0,212,170,0.12);border-radius:10px;padding:12px 20px;text-align:center;min-width:90px}
+.stat .v{font-size:22px;font-weight:800;font-family:monospace}
+.stat .l{font-size:11px;color:#6b7fa3;margin-top:2px}
+.body{padding:20px 28px}
+.section{margin-bottom:32px}
+.section-title{font-size:16px;font-weight:700;margin-bottom:12px;color:#f0f4ff;display:flex;align-items:center;gap:8px}
+.section-title::after{content:'';flex:1;height:1px;background:rgba(0,212,170,0.15);margin-left:8px}
+table{width:100%;border-collapse:collapse;font-size:12px;overflow:auto;display:block}
+thead tr th{background:#111b3a;color:#94a3b8;padding:8px 10px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;border-bottom:1px solid rgba(0,212,170,0.12)}
+tbody tr td{padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:top;font-size:12px;color:#d1d9f0;max-width:260px;word-break:break-word}
+tbody tr:hover td{background:rgba(255,255,255,0.03)}
+.steps-cell{font-family:monospace;font-size:11px;line-height:1.8;white-space:pre-wrap}
+.badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700}
+.badge.Critical{background:rgba(239,68,68,0.15);color:#f87171}
+.badge.High{background:rgba(249,115,22,0.15);color:#fb923c}
+.badge.Medium{background:rgba(234,179,8,0.15);color:#fbbf24}
+.badge.Low{background:rgba(74,222,128,0.15);color:#4ade80}
+.badge.passed{background:rgba(74,222,128,0.15);color:#4ade80}
+.badge.failed{background:rgba(248,113,113,0.15);color:#f87171}
+.badge.PASSED{background:rgba(74,222,128,0.15);color:#4ade80}
+.badge.FAILED{background:rgba(248,113,113,0.15);color:#f87171}
+.result-row{border-radius:8px;margin-bottom:8px;overflow:hidden}
+.result-row.passed{background:rgba(74,222,128,0.04);border:1px solid rgba(74,222,128,0.2)}
+.result-row.failed{background:rgba(248,113,113,0.04);border:1px solid rgba(248,113,113,0.2)}
+.result-header{display:flex;align-items:center;gap:10px;padding:10px 14px}
+.result-name{flex:1;font-size:13px;font-weight:500}
+.result-meta{font-size:11px;color:#6b7fa3;font-family:monospace}
+.result-detail{padding:10px 14px 14px;border-top:1px solid rgba(255,255,255,0.05)}
+.error-box{background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.25);border-radius:6px;padding:8px 10px;color:#f87171;font-size:12px;margin-bottom:10px}
+.screenshot-wrap{position:relative;display:inline-block}
+.screenshot{max-width:100%;border-radius:8px;border:1px solid rgba(0,212,170,0.15);display:block}
+.ss-label{font-size:10px;color:#6b7fa3;margin-top:4px}
+.type-badge{font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(0,212,170,0.1);color:#00d4aa;font-family:monospace}
 </style>
 </head>
 <body>
-<h1>🧪 TestItNow — Full Test Report</h1>
-<p style="color:#64748b;margin-bottom:12px">Generated: ${new Date().toLocaleString()} | Domain: ${filter.domain || 'All'}</p>
-
-<div class="meta">
-  <div class="meta-box"><div class="val">${allTests.length}</div><div class="lbl">Total Tests</div></div>
-  <div class="meta-box"><div class="val" style="color:#16a34a">${results.filter(r=>r.status==='passed').length}</div><div class="lbl">Passed</div></div>
-  <div class="meta-box"><div class="val" style="color:#dc2626">${results.filter(r=>r.status==='failed').length}</div><div class="lbl">Failed</div></div>
-  <div class="meta-box"><div class="val" style="color:#2563eb">${passRate}%</div><div class="lbl">Pass Rate</div></div>
-  <div class="meta-box"><div class="val" style="color:#7c3aed">${bugs.length}</div><div class="lbl">Bugs</div></div>
+<div class="header">
+  <div class="logo">TestIt<span>Now</span> — Full Test Report</div>
+  <div class="gen">Generated: ${new Date().toLocaleString()}</div>
 </div>
 
-<h2>Test Cases (${allTests.length})</h2>
-<table>
-  <thead><tr><th>#</th><th>ID</th><th>Title</th><th>Type</th><th>Priority</th><th>Expected Result</th></tr></thead>
-  <tbody>
-    ${allTests.map((t,i) => `
-    <tr>
-      <td>${i+1}</td>
-      <td style="font-family:monospace;white-space:nowrap">${t.id||''}</td>
-      <td>${t.name||''}</td>
-      <td style="text-transform:uppercase;font-size:9px">${t.type||''}</td>
-      <td><span class="badge badge-${(t.priority||'').toLowerCase()}">${t.priority||''}</span></td>
-      <td style="color:#475569">${(t.expectedResult||'').substring(0,80)}${(t.expectedResult||'').length>80?'…':''}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>
+<div class="summary">
+  ${[['Total Tests',allTests.length,'#f0f4ff'],['Passed',passed,'#4ade80'],['Failed',results.filter(r=>r.status==='failed').length,'#f87171'],['Pass Rate',passRate+'%','#00d4aa'],['Duration',results.length?Math.round(results.reduce((s,r)=>s+(r.duration||0),0)/1000)+'s':'—','#3b82f6'],['Bugs',bugs.length,'#a78bfa']].map(([l,v,c])=>
+    `<div class="stat"><div class="v" style="color:${c}">${v}</div><div class="l">${l}</div></div>`
+  ).join('')}
+</div>
 
+<div class="body">
+
+<!-- TEST RESULTS WITH SCREENSHOTS -->
 ${results.length ? `
-<h2>Test Results (${results.length})</h2>
-<table>
-  <thead><tr><th>#</th><th>ID</th><th>Test Name</th><th>Type</th><th>Status</th><th>Duration</th><th>Error</th></tr></thead>
-  <tbody>
-    ${results.map((r,i) => `
-    <tr>
-      <td>${i+1}</td>
-      <td style="font-family:monospace">${r.id||''}</td>
-      <td>${r.name||''}</td>
-      <td style="text-transform:uppercase;font-size:9px">${r.type||''}</td>
-      <td><span class="badge badge-${r.status||''}">${(r.status||'').toUpperCase()}</span></td>
-      <td>${r.duration||0}ms</td>
-      <td style="color:#dc2626;font-size:9px">${r.error||''}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>` : ''}
+<div class="section">
+  <div class="section-title">🧪 Test Results with Screenshots (${results.length})</div>
+  ${results.map((r,i) => `
+  <div class="result-row ${r.status||''}">
+    <div class="result-header">
+      <span>${r.status==='passed'?'✅':'❌'}</span>
+      <span class="result-name">${r.name||''}</span>
+      <span class="badge ${r.status||''}">${(r.status||'').toUpperCase()}</span>
+      <span class="result-meta">${r.duration||0}ms</span>
+      ${r.isRetest ? '<span class="badge" style="background:rgba(59,130,246,0.15);color:#60a5fa">RETEST</span>' : ''}
+    </div>
+    ${r.error || r.screenshot ? `<div class="result-detail">
+      ${r.error ? `<div class="error-box">⚠ ${r.error}</div>` : ''}
+      ${r.screenshot ? `<div class="screenshot-wrap">
+        <img src="${r.screenshot}" alt="Screenshot for ${r.name||''}" class="screenshot" loading="lazy"/>
+        <div class="ss-label">📸 Screenshot captured at ${r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : 'runtime'} — Click to view full size</div>
+      </div>` : ''}
+    </div>` : ''}
+  </div>`).join('')}
+</div>` : ''}
 
+<!-- TEST CASES TABLE WITH STEPS AS SEPARATE COLUMN -->
+<div class="section">
+  <div class="section-title">📋 Test Cases (${allTests.length}) — with detailed steps</div>
+  <table>
+    <thead><tr>${colDefs.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead>
+    <tbody>
+      ${allTests.map(t=>`<tr>
+        ${colDefs.map(c=>{
+          const v = getTestVal(t, c.key);
+          if (c.key==='priority') return `<td><span class="badge ${v}">${v}</span></td>`;
+          if (c.key==='status')   return `<td><span class="badge ${v}">${v}</span></td>`;
+          if (c.key==='type')     return `<td><span class="type-badge">${v}</span></td>`;
+          if (c.key==='testSteps')return `<td class="steps-cell">${String(v).replace(/\n/g,'<br>')}</td>`;
+          return `<td>${String(v).substring(0,250)}</td>`;
+        }).join('')}
+      </tr>`).join('')}
+    </tbody>
+  </table>
+</div>
+
+<!-- BUGS -->
 ${bugs.length ? `
-<h2>Bug Reports (${bugs.length})</h2>
-<table>
-  <thead><tr><th>#</th><th>Key</th><th>Summary</th><th>Severity</th><th>Priority</th><th>Status</th></tr></thead>
-  <tbody>
-    ${bugs.map((b,i) => `
-    <tr>
-      <td>${i+1}</td>
-      <td style="font-family:monospace">${b.jiraKey||''}</td>
-      <td>${b.summary||''}</td>
-      <td><span class="badge badge-${(b.severity||'').toLowerCase()}">${b.severity||''}</span></td>
-      <td><span class="badge badge-${(b.priority||'').toLowerCase()}">${b.priority||''}</span></td>
-      <td>${b.status||''}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>` : ''}
+<div class="section">
+  <div class="section-title">🐛 Bug Reports (${bugs.length})</div>
+  <table>
+    <thead><tr><th>Key</th><th>Summary</th><th>Severity</th><th>Priority</th><th>Status</th><th>Created</th><th>Description</th></tr></thead>
+    <tbody>
+      ${bugs.map(b=>`<tr>
+        <td style="font-family:monospace;color:#00d4aa">${b.jiraKey||''}</td>
+        <td>${b.summary||''}</td>
+        <td><span class="badge ${b.severity||''}">${b.severity||''}</span></td>
+        <td><span class="badge ${b.priority||''}">${b.priority||''}</span></td>
+        <td>${b.status||''}</td>
+        <td style="white-space:nowrap">${b.createdAt?new Date(b.createdAt).toLocaleDateString():''}</td>
+        <td>${b.description||''}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+</div>` : ''}
 
-<div class="footer">TestItNow Professional Testing Framework — ${window.location.origin}</div>
+</div>
 </body>
 </html>`;
 
-  const win = window.open('', '_blank');
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); }, 500);
+  dl(html, `TestItNow_Report_${new Date().toISOString().split('T')[0]}.html`, 'text/html;charset=utf-8');
 }
 
-// ── Word / DOCX-style HTML ────────────────────────────────────
-function downloadWord(tests, results, bugs) {
-  const allTests = Object.entries(tests).flatMap(([type, list]) =>
-    list.map(t => ({ ...t, type }))
-  );
+// ── Word (.doc) ───────────────────────────────────────────────
+function downloadWord(tests, results, bugs, selectedCols) {
+  const allTests = Object.entries(tests).flatMap(([type,list])=>list.map(t=>({...t,type})));
+  const cols     = selectedCols.length ? selectedCols : ['id','name','type','priority','testSteps','expectedResult'];
+  const colDefs  = TC_COLS.filter(c => cols.includes(c.key));
 
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
-  xmlns:w="urn:schemas-microsoft-com:office:word"
-  xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-<meta charset="utf-8">
-<title>TestItNow Test Report</title>
-<!--[if gte mso 9]>
-<xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml>
-<![endif]-->
+  const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'>
+<head><meta charset='utf-8'><title>TestItNow Report</title>
 <style>
-  body   { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #1e293b; margin: 2cm; }
-  h1     { font-size: 20pt; color: #1e3a5f; border-bottom: 2px solid #3b82f6; padding-bottom: 6pt; }
-  h2     { font-size: 14pt; color: #1e3a5f; margin-top: 18pt; border-left: 4px solid #3b82f6; padding-left: 8pt; }
-  h3     { font-size: 12pt; color: #334155; margin-top: 12pt; }
-  p      { margin: 4pt 0; line-height: 1.5; }
-  table  { border-collapse: collapse; width: 100%; margin: 10pt 0; font-size: 9pt; }
-  th     { background: #1e3a5f; color: white; padding: 5pt 8pt; text-align: left; border: 1px solid #1e3a5f; }
-  td     { padding: 4pt 8pt; border: 1px solid #cbd5e1; vertical-align: top; }
-  tr:nth-child(even) td { background: #f8fafc; }
-  .meta  { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 10pt; margin: 10pt 0; border-radius: 4pt; }
-  .label { font-weight: bold; color: #475569; }
-</style>
-</head>
-<body>
+body{font-family:Calibri,Arial;font-size:11pt;margin:2cm}
+h1{font-size:18pt;color:#1e3a5f;border-bottom:2pt solid #3b82f6;padding-bottom:4pt}
+h2{font-size:13pt;color:#1e3a5f;margin-top:14pt;border-left:4pt solid #3b82f6;padding-left:6pt}
+h3{font-size:11pt;color:#334155;margin-top:10pt}
+table{border-collapse:collapse;width:100%;font-size:9pt;margin:6pt 0}
+th{background:#1e3a5f;color:#fff;padding:4pt 6pt;text-align:left;border:1pt solid #1e3a5f}
+td{padding:3pt 6pt;border:1pt solid #cbd5e1;vertical-align:top;word-break:break-word}
+tr:nth-child(even) td{background:#f8fafc}
+.steps{font-family:'Courier New';font-size:8pt;white-space:pre-wrap}
+.meta{background:#f1f5f9;border:1pt solid #cbd5e1;padding:8pt;margin:6pt 0}
+</style></head><body>
 <h1>🧪 TestItNow — Test Report</h1>
 <div class="meta">
-  <p><span class="label">Generated:</span> ${new Date().toLocaleString()}</p>
-  <p><span class="label">Total Test Cases:</span> ${allTests.length}</p>
-  <p><span class="label">Total Results:</span> ${results.length} (${results.filter(r=>r.status==='passed').length} passed, ${results.filter(r=>r.status==='failed').length} failed)</p>
-  <p><span class="label">Bug Reports:</span> ${bugs.length}</p>
+<p><b>Generated:</b> ${new Date().toLocaleString()}</p>
+<p><b>Test Cases:</b> ${allTests.length}</p>
+<p><b>Results:</b> ${results.length} (${results.filter(r=>r.status==='passed').length} passed / ${results.filter(r=>r.status==='failed').length} failed)</p>
+<p><b>Bugs:</b> ${bugs.length}</p>
 </div>
 
-<h2>1. Test Cases</h2>
-${['ui','api','security','performance','database','unit'].map(type => {
-  const list = tests[type] || [];
+<h2>1. Test Cases — with Test Steps column</h2>
+${TYPES.map(type => {
+  const list = tests[type]||[];
   if (!list.length) return '';
-  return `<h3>1.${['ui','api','security','performance','database','unit'].indexOf(type)+1} ${type.toUpperCase()} Tests (${list.length})</h3>
-<table>
-  <thead><tr><th>ID</th><th>Title</th><th>Priority</th><th>Preconditions</th><th>Test Steps</th><th>Expected Result</th></tr></thead>
-  <tbody>
-    ${list.map(t => `<tr>
-      <td style="font-family:Courier New;white-space:nowrap">${t.id||''}</td>
-      <td>${t.name||''}</td>
-      <td>${t.priority||''}</td>
-      <td>${t.preconditions||''}</td>
-      <td>${(t.testSteps||'').replace(/\|/g,'<br>')}</td>
-      <td>${t.expectedResult||''}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>`;
+  const idx = TYPES.indexOf(type)+1;
+  return `<h3>1.${idx} ${type.toUpperCase()} (${list.length})</h3>
+<table><thead><tr>${colDefs.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead>
+<tbody>${list.map(t=>`<tr>${colDefs.map(c=>{
+  const v = getTestVal({...t,type}, c.key);
+  if (c.key==='testSteps') return `<td class="steps">${String(v)}</td>`;
+  return `<td>${String(v).substring(0,300)}</td>`;
+}).join('')}</tr>`).join('')}</tbody></table>`;
 }).join('')}
 
-${results.length ? `
-<h2>2. Test Execution Results</h2>
-<table>
-  <thead><tr><th>ID</th><th>Test Name</th><th>Type</th><th>Status</th><th>Duration (ms)</th><th>Timestamp</th><th>Error</th></tr></thead>
-  <tbody>
-    ${results.map(r => `<tr>
-      <td style="font-family:Courier New">${r.id||''}</td>
-      <td>${r.name||''}</td>
-      <td>${(r.type||'').toUpperCase()}</td>
-      <td style="font-weight:bold;color:${r.status==='passed'?'#16a34a':'#dc2626'}">${(r.status||'').toUpperCase()}</td>
-      <td>${r.duration||0}</td>
-      <td>${r.timestamp ? new Date(r.timestamp).toLocaleString() : ''}</td>
-      <td style="color:#dc2626">${r.error||''}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>` : ''}
+${results.length ? `<h2>2. Test Results</h2>
+<table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Duration</th><th>Timestamp</th><th>Error</th></tr></thead>
+<tbody>${results.map(r=>`<tr>
+<td style="font-family:Courier New">${r.id||''}</td>
+<td>${r.name||''}</td>
+<td>${(r.type||'').toUpperCase()}</td>
+<td style="font-weight:bold;color:${r.status==='passed'?'#16a34a':'#dc2626'}">${(r.status||'').toUpperCase()}</td>
+<td>${r.duration||0}ms</td>
+<td>${r.timestamp?new Date(r.timestamp).toLocaleString():''}</td>
+<td style="color:#dc2626">${r.error||''}</td>
+</tr>`).join('')}</tbody></table>`:''}
 
-${bugs.length ? `
-<h2>3. Bug Reports</h2>
-<table>
-  <thead><tr><th>Key</th><th>Summary</th><th>Severity</th><th>Priority</th><th>Status</th><th>Description</th></tr></thead>
-  <tbody>
-    ${bugs.map(b => `<tr>
-      <td style="font-family:Courier New">${b.jiraKey||''}</td>
-      <td>${b.summary||''}</td>
-      <td>${b.severity||''}</td>
-      <td>${b.priority||''}</td>
-      <td>${b.status||''}</td>
-      <td>${b.description||''}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>` : ''}
-
+${bugs.length ? `<h2>3. Bug Reports</h2>
+<table><thead><tr><th>Key</th><th>Summary</th><th>Severity</th><th>Priority</th><th>Status</th></tr></thead>
+<tbody>${bugs.map(b=>`<tr><td>${b.jiraKey||''}</td><td>${b.summary||''}</td><td>${b.severity||''}</td><td>${b.priority||''}</td><td>${b.status||''}</td></tr>`).join('')}</tbody></table>`:''}
 </body></html>`;
 
-  triggerDownload(html, 'TestItNow_Report.doc',
-    'application/msword');
+  dl(html, 'TestItNow_Report.doc', 'application/msword;charset=utf-8');
 }
 
 // ── XML ───────────────────────────────────────────────────────
-function escapeXml(s) {
-  return String(s||'')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-    .replace(/'/g,'&apos;');
-}
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;'); }
 
 function downloadXML(tests, results, bugs) {
-  const allTests = Object.entries(tests).flatMap(([type, list]) =>
-    list.map(t => ({ ...t, type }))
-  );
+  const allTests = Object.entries(tests).flatMap(([type,list])=>list.map(t=>({...t,type})));
+  const passed   = results.filter(r=>r.status==='passed').length;
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <TestReport generated="${new Date().toISOString()}" tool="TestItNow">
-
   <Summary>
     <TotalTestCases>${allTests.length}</TotalTestCases>
     <TotalResults>${results.length}</TotalResults>
-    <Passed>${results.filter(r=>r.status==='passed').length}</Passed>
+    <Passed>${passed}</Passed>
     <Failed>${results.filter(r=>r.status==='failed').length}</Failed>
-    <PassRate>${results.length ? Math.round((results.filter(r=>r.status==='passed').length/results.length)*100) : 0}%</PassRate>
+    <PassRate>${results.length?Math.round(passed/results.length*100):0}%</PassRate>
     <BugCount>${bugs.length}</BugCount>
   </Summary>
-
   <TestCases count="${allTests.length}">
-${allTests.map(t => `    <TestCase id="${escapeXml(t.id)}" type="${escapeXml(t.type)}">
-      <Title>${escapeXml(t.name)}</Title>
-      <Priority>${escapeXml(t.priority)}</Priority>
-      <Status>${escapeXml(t.status||'Draft')}</Status>
-      <Description>${escapeXml(t.description)}</Description>
-      <Preconditions>${escapeXml(t.preconditions)}</Preconditions>
-      <TestSteps>${escapeXml(t.testSteps)}</TestSteps>
-      <TestData>${escapeXml(t.testData)}</TestData>
-      <ExpectedResult>${escapeXml(t.expectedResult)}</ExpectedResult>
+${allTests.map(t=>`    <TestCase id="${esc(t.id)}" type="${esc(t.type)}">
+      <Title>${esc(t.name)}</Title>
+      <Priority>${esc(t.priority)}</Priority>
+      <Status>${esc(t.status||'Draft')}</Status>
+      <Description>${esc(t.description)}</Description>
+      <Preconditions>${esc(t.preconditions)}</Preconditions>
+      <TestSteps>${esc((t.testSteps||'').split(' | ').map((s,i)=>`${i+1}. ${s}`).join('\n'))}</TestSteps>
+      <TestData>${esc(t.testData)}</TestData>
+      <ExpectedResult>${esc(t.expectedResult)}</ExpectedResult>
+      <URL>${esc(t.url)}</URL>
     </TestCase>`).join('\n')}
   </TestCases>
-
   <TestResults count="${results.length}">
-${results.map(r => `    <Result testId="${escapeXml(r.id)}">
-      <TestName>${escapeXml(r.name)}</TestName>
-      <Type>${escapeXml(r.type)}</Type>
-      <Status>${escapeXml(r.status)}</Status>
+${results.map(r=>`    <Result testId="${esc(r.id)}">
+      <TestName>${esc(r.name)}</TestName>
+      <Type>${esc(r.type)}</Type>
+      <Status>${esc(r.status)}</Status>
       <DurationMs>${r.duration||0}</DurationMs>
       <Timestamp>${r.timestamp||''}</Timestamp>
-      <IsRetest>${r.isRetest||false}</IsRetest>
-      <ErrorMessage>${escapeXml(r.error)}</ErrorMessage>
+      <ErrorMessage>${esc(r.error)}</ErrorMessage>
+      <HasScreenshot>${!!r.screenshot}</HasScreenshot>
     </Result>`).join('\n')}
   </TestResults>
-
   <BugReports count="${bugs.length}">
-${bugs.map(b => `    <Bug key="${escapeXml(b.jiraKey)}">
-      <Summary>${escapeXml(b.summary)}</Summary>
-      <Description>${escapeXml(b.description)}</Description>
-      <Severity>${escapeXml(b.severity)}</Severity>
-      <Priority>${escapeXml(b.priority)}</Priority>
-      <Status>${escapeXml(b.status)}</Status>
+${bugs.map(b=>`    <Bug key="${esc(b.jiraKey)}">
+      <Summary>${esc(b.summary)}</Summary>
+      <Severity>${esc(b.severity)}</Severity>
+      <Priority>${esc(b.priority)}</Priority>
+      <Status>${esc(b.status)}</Status>
       <CreatedAt>${b.createdAt||''}</CreatedAt>
     </Bug>`).join('\n')}
   </BugReports>
-
 </TestReport>`;
 
-  triggerDownload(xml, 'TestItNow_Report.xml', 'application/xml;charset=utf-8');
+  dl(xml, 'TestItNow_Report.xml', 'application/xml;charset=utf-8');
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function applyFilter(tests, filter) {
+  return tests.filter(t => {
+    if (filter.type     && t.type     !== filter.type)     return false;
+    if (filter.priority && t.priority !== filter.priority) return false;
+    if (filter.search   && !`${t.name||''}${t.id||''}`.toLowerCase().includes((filter.search||'').toLowerCase())) return false;
+    return true;
+  });
+}
+function applyResFilter(results, filter) {
+  return results.filter(r => {
+    if (filter.resultStatus && r.status !== filter.resultStatus) return false;
+    if (filter.search && !`${r.name||''}${r.id||''}`.toLowerCase().includes((filter.search||'').toLowerCase())) return false;
+    return true;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
-// MAIN REPORTS PAGE COMPONENT
+// MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 export default function ReportsPage({ tests, results, bugs, onBack }) {
-  const [activeSection, setActiveSection] = useState('overview');
-  const [filter, setFilter]               = useState({ type: '', priority: '', status: '', search: '' });
-  const [expandedTest, setExpandedTest]   = useState(null);
-  const [expandedResult, setExpandedResult] = useState(null);
-
-  const TYPES = ['ui','api','security','performance','database','unit'];
+  const [section,       setSection]       = useState('overview');
+  const [filter,        setFilter]        = useState({ type:'', priority:'', resultStatus:'', search:'' });
+  const [selectedTCols, setSelectedTCols] = useState(TC_COLS.map(c=>c.key));
+  const [selectedRCols, setSelectedRCols] = useState(RES_COLS.map(c=>c.key));
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [expandedTC,    setExpandedTC]    = useState(null);
+  const [expandedRes,   setExpandedRes]   = useState(null);
+  const [templateTxt,   setTemplateTxt]   = useState('');
+  const [templateName,  setTemplateName]  = useState('');
+  const fileRef = useRef(null);
 
   const allTests = useMemo(() =>
-    Object.entries(tests).flatMap(([type, list]) => list.map(t => ({ ...t, type }))),
-    [tests]
-  );
+    Object.entries(tests).flatMap(([type,list])=>list.map(t=>({...t,type}))), [tests]);
 
-  const filteredTests = useMemo(() => allTests.filter(t => {
-    if (filter.type     && t.type     !== filter.type)     return false;
-    if (filter.priority && t.priority !== filter.priority) return false;
-    if (filter.status   && (t.status||'Draft') !== filter.status) return false;
-    if (filter.search   && !`${t.name}${t.id}${t.description}`.toLowerCase().includes(filter.search.toLowerCase())) return false;
-    return true;
-  }), [allTests, filter]);
+  const filteredTests = useMemo(() => applyFilter(allTests, filter), [allTests, filter]);
+  const filteredRes   = useMemo(() => applyResFilter(results, filter), [results, filter]);
 
   const summary = useMemo(() => ({
     total:    results.length,
-    passed:   results.filter(r => r.status === 'passed').length,
-    failed:   results.filter(r => r.status === 'failed').length,
-    passRate: results.length ? Math.round((results.filter(r=>r.status==='passed').length / results.length) * 100) : 0,
-    duration: results.reduce((s,r) => s + (r.duration||0), 0),
+    passed:   results.filter(r=>r.status==='passed').length,
+    failed:   results.filter(r=>r.status==='failed').length,
+    passRate: results.length ? Math.round(results.filter(r=>r.status==='passed').length/results.length*100) : 0,
+    duration: results.reduce((s,r)=>s+(r.duration||0),0),
   }), [results]);
 
-  const priorityCount = useMemo(() => {
-    const c = { Critical: 0, High: 0, Medium: 0, Low: 0 };
-    allTests.forEach(t => { if (c[t.priority] !== undefined) c[t.priority]++; });
-    return c;
-  }, [allTests]);
+  const pColor = p => ({ Critical:'bg-red-900/40 text-red-300 border-red-700/40', High:'bg-orange-900/40 text-orange-300 border-orange-700/40', Medium:'bg-yellow-900/40 text-yellow-300 border-yellow-700/40', Low:'bg-green-900/40 text-green-300 border-green-700/40' }[p] || 'bg-slate-700/40 text-slate-400 border-slate-600');
 
-  const typeCount = useMemo(() => {
-    const c = {};
-    TYPES.forEach(t => { c[t] = (tests[t]||[]).length; });
-    return c;
-  }, [tests]);
+  const handleTemplate = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => { setTemplateTxt(ev.target.result); setTemplateName(file.name); };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
-  const priorityColor = p => ({
-    Critical: 'bg-red-900/40 text-red-300 border-red-700/40',
-    High:     'bg-orange-900/40 text-orange-300 border-orange-700/40',
-    Medium:   'bg-yellow-900/40 text-yellow-300 border-yellow-700/40',
-    Low:      'bg-green-900/40 text-green-300 border-green-700/40',
-  }[p] || 'bg-slate-700 text-slate-300 border-slate-600');
-
-  const statusColor = s => ({
-    passed: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/40',
-    failed: 'bg-red-900/40 text-red-300 border-red-700/40',
-    Draft:  'bg-slate-700/40 text-slate-400 border-slate-600',
-  }[s] || 'bg-slate-700/40 text-slate-400 border-slate-600');
-
-  // ── Download buttons config ───────────────────────────────
-  const downloadOptions = [
-    {
-      label: 'Excel / CSV',
-      icon:  FileSpreadsheet,
-      color: 'bg-emerald-600 hover:bg-emerald-500',
-      desc:  '3 sheets: Test Cases, Results, Bugs',
-      action: () => downloadExcel(tests, results, bugs),
-    },
-    {
-      label: 'PDF',
-      icon:  File,
-      color: 'bg-red-600 hover:bg-red-500',
-      desc:  'Formatted report — opens print dialog',
-      action: () => downloadPDF(tests, results, bugs, filter),
-    },
-    {
-      label: 'Word (.doc)',
-      icon:  FileText,
-      color: 'bg-blue-600 hover:bg-blue-500',
-      desc:  'Full report with tables — opens in Word',
-      action: () => downloadWord(tests, results, bugs),
-    },
-    {
-      label: 'XML',
-      icon:  FileCode,
-      color: 'bg-purple-600 hover:bg-purple-500',
-      desc:  'Structured XML for tool integration',
-      action: () => downloadXML(tests, results, bugs),
-    },
-  ];
+  const dlWithTemplate = () => {
+    if (!templateTxt) return;
+    try {
+      const lines = templateTxt.split('\n');
+      const heads = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,'').toLowerCase());
+      const rows  = [heads.join(',')];
+      const ALL_TC = TC_COLS.map(c=>c.key);
+      allTests.forEach((t,i) => {
+        rows.push(heads.map(h => {
+          const key = TC_COLS.find(c=>c.label.toLowerCase()===h||c.key.toLowerCase()===h)?.key;
+          return key ? String(getTestVal(t,key)).replace(/\n/g,' ') : '';
+        }).map(v => v.includes(',') ? `"${v}"` : v).join(','));
+      });
+      dl('\uFEFF'+rows.join('\r\n'), 'TestItNow_Template_Export.csv', 'text/csv;charset=utf-8');
+    } catch(e) { alert('Template error: ' + e.message); }
+  };
 
   const navItems = [
-    { id: 'overview',  label: 'Overview',    icon: BarChart2  },
-    { id: 'testcases', label: 'Test Cases',   icon: FileText   },
-    { id: 'results',   label: 'Results',      icon: CheckCircle },
-    { id: 'bugs',      label: 'Bugs',         icon: Bug        },
-    { id: 'download',  label: 'Downloads',    icon: Download   },
+    { id:'overview',  label:'Overview',   icon:BarChart2 },
+    { id:'testcases', label:'Test Cases',  icon:FileText,   badge:allTests.length },
+    { id:'results',   label:'Results',     icon:CheckCircle,badge:results.length },
+    { id:'bugs',      label:'Bugs',        icon:Bug,        badge:bugs.length },
+    { id:'downloads', label:'Downloads',   icon:Download },
+    { id:'templates', label:'Templates',   icon:Upload },
   ];
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 font-sans">
-      {/* ── Top Bar ── */}
-      <div className="bg-slate-800/80 border-b border-slate-700 px-6 py-3 flex items-center justify-between sticky top-0 z-10 backdrop-blur">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack}
-            className="flex items-center gap-2 text-slate-400 hover:text-white text-sm transition-colors">
-            <ArrowLeft size={16} /> Back
-          </button>
-          <div className="w-px h-5 bg-slate-600" />
-          <h1 className="text-white font-bold text-lg flex items-center gap-2">
-            <FileText className="text-blue-400" size={20} />
-            Reports & Downloads
-          </h1>
-        </div>
+  const dlAll = () => {
+    downloadCSV_TC(tests, selectedTCols, filter);
+    setTimeout(() => downloadCSV_Results(results, selectedRCols, filter), 350);
+    setTimeout(() => downloadCSV_Bugs(bugs), 700);
+    setTimeout(() => downloadXML(tests, results, bugs), 1050);
+  };
 
-        {/* Quick download all */}
-        <button
-          onClick={() => {
-            downloadExcel(tests, results, bugs);
-            setTimeout(() => downloadXML(tests, results, bugs), 400);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium"
-        >
-          <Download size={15} /> Download All
-        </button>
+  return (
+    <div className="min-h-screen font-sans" style={{ background:'#0a0f1e', color:'#f0f4ff', display:'flex', flexDirection:'column' }}>
+      {/* Top bar */}
+      <div style={{ background:'#0d1530', borderBottom:'1px solid rgba(0,212,170,0.12)', padding:'10px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0, zIndex:50 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <button onClick={onBack} style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'#6b7fa3', cursor:'pointer', fontSize:13 }}>
+            <ArrowLeft size={15}/> Back
+          </button>
+          <div style={{ width:1, height:20, background:'rgba(255,255,255,0.1)' }}/>
+          <span style={{ color:'#f0f4ff', fontWeight:700, fontSize:15, display:'flex', alignItems:'center', gap:6 }}>
+            <FileText size={16} style={{ color:'#00d4aa' }}/> Reports & Downloads
+          </span>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={() => downloadHTML(tests, results, bugs, selectedTCols, filter)}
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+            <Eye size={13}/> HTML Report
+          </button>
+          <button onClick={dlAll}
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'none', background:'linear-gradient(135deg,#00d4aa,#3b82f6)', color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
+            <Download size={13}/> Download All
+          </button>
+        </div>
       </div>
 
-      <div className="flex">
-        {/* ── Sidebar Nav ── */}
-        <div className="w-48 min-h-screen bg-slate-800/50 border-r border-slate-700 p-3 shrink-0">
-          <nav className="space-y-1">
-            {navItems.map(item => {
-              const Icon = item.icon;
-              return (
-                <button key={item.id} onClick={() => setActiveSection(item.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all ${
-                    activeSection === item.id
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                  }`}>
-                  <Icon size={15} />
-                  {item.label}
-                  {item.id === 'testcases' && allTests.length > 0 && (
-                    <span className="ml-auto text-xs bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded-full">
-                      {allTests.length}
-                    </span>
-                  )}
-                  {item.id === 'results' && results.length > 0 && (
-                    <span className="ml-auto text-xs bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded-full">
-                      {results.length}
-                    </span>
-                  )}
-                  {item.id === 'bugs' && bugs.length > 0 && (
-                    <span className="ml-auto text-xs bg-red-700 text-red-200 px-1.5 py-0.5 rounded-full">
-                      {bugs.length}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
+      <div style={{ display:'flex', flex:1 }}>
+        {/* Sidebar */}
+        <div style={{ width:180, background:'#0d1530', borderRight:'1px solid rgba(0,212,170,0.12)', padding:'10px 8px', flexShrink:0 }}>
+          {navItems.map(item => {
+            const Icon = item.icon;
+            const on   = section === item.id;
+            return (
+              <button key={item.id} onClick={()=>setSection(item.id)} style={{
+                width:'100%', display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', marginBottom:2, fontSize:13, fontWeight: on?600:400,
+                background: on ? 'rgba(0,212,170,0.1)' : 'transparent',
+                color: on ? '#00d4aa' : '#94a3b8',
+                borderLeft: `2px solid ${on ? '#00d4aa' : 'transparent'}`,
+              }}>
+                <Icon size={14}/>
+                <span style={{ flex:1, textAlign:'left' }}>{item.label}</span>
+                {item.badge > 0 && <span style={{ fontSize:10, fontWeight:700, padding:'1px 5px', borderRadius:10, background: on ? '#00d4aa' : 'rgba(255,255,255,0.08)', color: on ? '#0a0f1e' : '#6b7fa3' }}>{item.badge}</span>}
+              </button>
+            );
+          })}
         </div>
 
-        {/* ── Main Content ── */}
-        <div className="flex-1 p-6 space-y-6 overflow-auto">
+        {/* Main content */}
+        <div style={{ flex:1, padding:'20px 24px', overflowY:'auto' }}>
 
           {/* ══ OVERVIEW ══ */}
-          {activeSection === 'overview' && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-bold text-white">Report Overview</h2>
-
-              {/* Stats grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {section === 'overview' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+              <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Overview</h2>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))', gap:10 }}>
                 {[
-                  { label: 'Total Tests',  value: allTests.length, color: 'text-white'         },
-                  { label: 'Passed',       value: summary.passed,  color: 'text-emerald-400'   },
-                  { label: 'Failed',       value: summary.failed,  color: 'text-red-400'       },
-                  { label: 'Pass Rate',    value: `${summary.passRate}%`, color: 'text-blue-400' },
-                  { label: 'Bug Reports',  value: bugs.length,     color: 'text-red-400'       },
-                  { label: 'Avg Duration', value: results.length ? `${Math.round(summary.duration/results.length)}ms` : '—', color: 'text-yellow-400' },
-                  { label: 'Critical',     value: priorityCount.Critical, color: 'text-red-400' },
-                  { label: 'High',         value: priorityCount.High,     color: 'text-orange-400' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 text-center">
-                    <div className={`text-2xl font-bold ${color}`}>{value}</div>
-                    <div className="text-xs text-slate-400 mt-1">{label}</div>
+                  { label:'Total Tests', val:allTests.length,  color:'#f0f4ff' },
+                  { label:'Passed',      val:summary.passed,   color:'#4ade80' },
+                  { label:'Failed',      val:summary.failed,   color:'#f87171' },
+                  { label:'Pass Rate',   val:`${summary.passRate}%`, color:'#00d4aa' },
+                  { label:'Bugs',        val:bugs.length,      color:'#f87171' },
+                  { label:'Critical',    val:allTests.filter(t=>t.priority==='Critical').length, color:'#f87171' },
+                ].map(s => (
+                  <div key={s.label} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.12)', borderRadius:10, padding:'12px', textAlign:'center' }}>
+                    <div style={{ color:s.color, fontWeight:800, fontSize:22, fontFamily:'monospace' }}>{s.val}</div>
+                    <div style={{ color:'#6b7fa3', fontSize:11, marginTop:3 }}>{s.label}</div>
                   </div>
                 ))}
               </div>
 
-              {/* By type */}
-              <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4">Test Cases by Type</h3>
-                <div className="space-y-2">
-                  {TYPES.map(type => {
-                    const count = typeCount[type] || 0;
-                    const pct   = allTests.length ? Math.round((count/allTests.length)*100) : 0;
-                    return (
-                      <div key={type} className="flex items-center gap-3">
-                        <span className="text-xs text-slate-400 w-24 uppercase font-mono">{type}</span>
-                        <div className="flex-1 bg-slate-700 rounded-full h-2">
-                          <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-xs text-slate-300 w-12 text-right">{count}</span>
+              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.12)', borderRadius:12, padding:'16px' }}>
+                <h3 style={{ fontSize:13, fontWeight:600, color:'#94a3b8', marginBottom:12 }}>By Type</h3>
+                {TYPES.map(type => {
+                  const cnt = (tests[type]||[]).length;
+                  const pct = allTests.length ? Math.round(cnt/allTests.length*100) : 0;
+                  return (
+                    <div key={type} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                      <span style={{ color:'#6b7fa3', fontSize:11, fontFamily:'monospace', textTransform:'uppercase', width:80 }}>{type}</span>
+                      <div style={{ flex:1, background:'rgba(255,255,255,0.06)', borderRadius:4, height:6 }}>
+                        <div style={{ height:'100%', borderRadius:4, background:TYPE_COLORS[type], width:`${pct}%` }}/>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Priority breakdown */}
-              <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4">Priority Distribution</h3>
-                <div className="grid grid-cols-4 gap-3">
-                  {Object.entries(priorityCount).map(([p, c]) => (
-                    <div key={p} className={`rounded-xl border p-3 text-center ${priorityColor(p)}`}>
-                      <div className="text-xl font-bold">{c}</div>
-                      <div className="text-xs mt-1">{p}</div>
+                      <span style={{ color:'#94a3b8', fontSize:11, width:30, textAlign:'right' }}>{cnt}</span>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
           {/* ══ TEST CASES ══ */}
-          {activeSection === 'testcases' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <h2 className="text-xl font-bold text-white">
-                  Test Cases <span className="text-slate-400 font-normal text-base">({filteredTests.length} of {allTests.length})</span>
-                </h2>
-                <button onClick={() => downloadExcel(tests, results, bugs)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm">
-                  <Download size={14} /> Export CSV
-                </button>
+          {section === 'testcases' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
+                <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Test Cases <span style={{ color:'#6b7fa3', fontWeight:400, fontSize:14 }}>({filteredTests.length}/{allTests.length})</span></h2>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button onClick={()=>setShowColPicker(showColPicker==='tc'?false:'tc')}
+                    style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#94a3b8', cursor:'pointer', fontSize:12 }}>
+                    <Settings size={12}/> Columns ({selectedTCols.length})
+                  </button>
+                  <button onClick={()=>downloadCSV_TC(tests,selectedTCols,filter)}
+                    style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'none', background:'#16a34a22', color:'#4ade80', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                    <FileSpreadsheet size={12}/> Export CSV
+                  </button>
+                </div>
               </div>
 
-              {/* Filters */}
-              <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 flex flex-wrap gap-3">
-                <div className="relative flex-1 min-w-48">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    value={filter.search}
-                    onChange={e => setFilter(p => ({...p, search: e.target.value}))}
-                    placeholder="Search tests…"
-                    className="w-full pl-8 pr-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  />
+              {/* Column picker */}
+              {showColPicker === 'tc' && (
+                <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.2)', borderRadius:12, padding:'14px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                    <span style={{ color:'#f0f4ff', fontSize:13, fontWeight:600 }}>Choose columns (Test Steps included by default)</span>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={()=>setSelectedTCols(TC_COLS.map(c=>c.key))} style={{ fontSize:11, padding:'3px 10px', borderRadius:6, border:'none', background:'rgba(59,130,246,0.2)', color:'#60a5fa', cursor:'pointer' }}>All</button>
+                      <button onClick={()=>setSelectedTCols(['id','name','type','priority','testSteps','expectedResult'])} style={{ fontSize:11, padding:'3px 10px', borderRadius:6, border:'none', background:'rgba(255,255,255,0.06)', color:'#94a3b8', cursor:'pointer' }}>Default</button>
+                      <button onClick={()=>setShowColPicker(false)} style={{ background:'none', border:'none', color:'#6b7fa3', cursor:'pointer' }}><X size={13}/></button>
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                    {TC_COLS.map(col => (
+                      <button key={col.key} onClick={()=>setSelectedTCols(prev=>prev.includes(col.key)?prev.filter(k=>k!==col.key):[...prev,col.key])}
+                        style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', borderRadius:20, border:`1px solid ${selectedTCols.includes(col.key)?'rgba(0,212,170,0.5)':'rgba(255,255,255,0.1)'}`, background: selectedTCols.includes(col.key)?'rgba(0,212,170,0.12)':'transparent', color: selectedTCols.includes(col.key)?'#00d4aa':'#6b7fa3', fontSize:12, cursor:'pointer' }}>
+                        {selectedTCols.includes(col.key) && <CheckCircle size={10}/>} {col.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                {[
-                  { key: 'type',     label: 'Type',     options: ['', ...TYPES] },
-                  { key: 'priority', label: 'Priority', options: ['', 'Critical','High','Medium','Low'] },
-                ].map(({ key, label, options }) => (
-                  <select key={key} value={filter[key]}
-                    onChange={e => setFilter(p => ({...p, [key]: e.target.value}))}
-                    className="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-blue-500">
-                    {options.map(o => <option key={o} value={o}>{o || `All ${label}s`}</option>)}
+              )}
+
+              {/* Filters */}
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:10, padding:'10px 12px' }}>
+                <div style={{ position:'relative', flex:1, minWidth:160 }}>
+                  <Search size={12} style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:'#6b7fa3' }}/>
+                  <input value={filter.search} onChange={e=>setFilter(p=>({...p,search:e.target.value}))} placeholder="Search tests…"
+                    style={{ width:'100%', paddingLeft:28, paddingRight:8, paddingTop:6, paddingBottom:6, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:7, color:'#f0f4ff', fontSize:12, outline:'none', fontFamily:'inherit' }}/>
+                </div>
+                {[{k:'type',opts:['','ui','api','security','performance','database','unit'],l:'All Types'},{k:'priority',opts:['','Critical','High','Medium','Low'],l:'All Priorities'}].map(({k,opts,l})=>(
+                  <select key={k} value={filter[k]} onChange={e=>setFilter(p=>({...p,[k]:e.target.value}))}
+                    style={{ padding:'6px 10px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:7, color:'#f0f4ff', fontSize:12, outline:'none' }}>
+                    {opts.map(o=><option key={o} value={o} style={{ background:'#111b3a' }}>{o||l}</option>)}
                   </select>
                 ))}
                 {(filter.type||filter.priority||filter.search) && (
-                  <button onClick={() => setFilter({ type:'', priority:'', status:'', search:'' })}
-                    className="px-3 py-1.5 border border-slate-600 text-slate-400 rounded-lg text-sm hover:bg-slate-700">
-                    Clear
+                  <button onClick={()=>setFilter({type:'',priority:'',resultStatus:'',search:''})} style={{ display:'flex', alignItems:'center', gap:4, padding:'6px 10px', border:'1px solid rgba(255,255,255,0.1)', borderRadius:7, background:'transparent', color:'#6b7fa3', cursor:'pointer', fontSize:12 }}>
+                    <X size={11}/> Clear
                   </button>
                 )}
               </div>
 
-              {/* Test case list */}
-              <div className="space-y-2">
-                {filteredTests.length === 0 ? (
-                  <div className="text-center py-16 text-slate-500">
-                    <AlertTriangle size={40} className="mx-auto mb-3 text-slate-600" />
-                    <p>No test cases found. Try adjusting your filters or analyze a website first.</p>
-                  </div>
-                ) : (
-                  filteredTests.map(test => (
-                    <div key={test.id}
-                      className="bg-slate-800/60 border border-slate-700 rounded-xl overflow-hidden">
-                      {/* Header row */}
-                      <div
-                        className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-700/40"
-                        onClick={() => setExpandedTest(expandedTest === test.id ? null : test.id)}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="text-xs font-mono text-slate-500 shrink-0">{test.id}</span>
-                          <span className="text-sm text-slate-200 font-medium truncate">{test.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${priorityColor(test.priority)}`}>
-                            {test.priority}
-                          </span>
-                          <span className="text-xs px-2 py-0.5 bg-slate-700 text-slate-400 rounded-full uppercase">
-                            {test.type}
-                          </span>
-                          {expandedTest === test.id
-                            ? <ChevronUp size={14} className="text-slate-400" />
-                            : <ChevronDown size={14} className="text-slate-400" />
-                          }
-                        </div>
-                      </div>
-
-                      {/* Expanded details */}
-                      {expandedTest === test.id && (
-                        <div className="border-t border-slate-700 p-4 space-y-3 bg-slate-900/30">
-                          {[
-                            ['Description',    test.description],
-                            ['Preconditions',  test.preconditions],
-                            ['Test Steps',     test.testSteps],
-                            ['Test Data',      test.testData],
-                            ['Expected Result',test.expectedResult],
-                          ].filter(([,v]) => v).map(([label, value]) => (
-                            <div key={label}>
-                              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</div>
-                              <div className="text-sm text-slate-300 bg-slate-800/60 rounded-lg p-2.5 whitespace-pre-wrap">
-                                {String(value).split(' | ').map((step, i) => (
-                                  <div key={i} className={i > 0 ? 'mt-1' : ''}>{step}</div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+              {/* Test list */}
+              {filteredTests.length === 0 ? (
+                <div style={{ textAlign:'center', padding:'48px', color:'#6b7fa3' }}><AlertTriangle size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>No tests match your filters.</p></div>
+              ) : filteredTests.map(test => (
+                <div key={test.id} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:10, overflow:'hidden' }}>
+                  <div style={{ display:'flex', alignItems:'center', padding:'9px 12px', gap:10, cursor:'pointer' }} onClick={()=>setExpandedTC(expandedTC===test.id?null:test.id)}>
+                    <div style={{ width:3, height:24, borderRadius:2, background:TYPE_COLORS[test.type]||'#6b7fa3', flexShrink:0 }}/>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ color:'#f0f4ff', fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{test.name}</div>
+                      <div style={{ color:'#6b7fa3', fontSize:10 }}>{test.id}</div>
                     </div>
-                  ))
-                )}
-              </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+                      <span style={{ fontSize:10, padding:'2px 7px', borderRadius:20, border:'1px solid', ...(() => {
+                        const m = { Critical:'rgba(239,68,68,0.15) #f87171 rgba(239,68,68,0.3)', High:'rgba(249,115,22,0.15) #fb923c rgba(249,115,22,0.3)', Medium:'rgba(234,179,8,0.15) #fbbf24 rgba(234,179,8,0.3)', Low:'rgba(74,222,128,0.15) #4ade80 rgba(74,222,128,0.3)' }[test.priority]||'rgba(255,255,255,0.06) #6b7fa3 rgba(255,255,255,0.1)';
+                        const [bg,col,border] = m.split(' '); return { background:bg, color:col, borderColor:border };
+                      })() }}>{test.priority}</span>
+                      <span style={{ fontSize:10, padding:'2px 6px', borderRadius:4, background:'rgba(255,255,255,0.06)', color:'#94a3b8' }}>{test.type}</span>
+                      <button onClick={e=>{e.stopPropagation(); const rows=[TC_COLS.map(c=>c.label),TC_COLS.map(c=>getTestVal(test,c.key))]; dl(toCSV(rows),`TC_${(test.id||'tc').replace(/[^a-z0-9]/gi,'_')}.csv`,'text/csv;charset=utf-8');}} style={{ background:'none', border:'none', color:'#00d4aa', cursor:'pointer', padding:3 }} title="Download this test"><Download size={12}/></button>
+                      {expandedTC===test.id?<ChevronUp size={13} style={{ color:'#6b7fa3' }}/>:<ChevronDown size={13} style={{ color:'#6b7fa3' }}/>}
+                    </div>
+                  </div>
+                  {expandedTC === test.id && (
+                    <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', padding:'12px', background:'rgba(0,0,0,0.2)' }}>
+                      {[['Description',test.description],['Preconditions',test.preconditions],['Test Steps',test.testSteps],['Test Data',test.testData],['Expected Result',test.expectedResult]]
+                        .filter(([,v])=>v).map(([label,value])=>(
+                          <div key={label} style={{ marginBottom:10 }}>
+                            <div style={{ color:'#6b7fa3', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4 }}>{label}</div>
+                            <div style={{ color:'#d1d9f0', fontSize:12, background:'rgba(255,255,255,0.04)', borderRadius:7, padding:'8px 10px', lineHeight:1.7 }}>
+                              {label === 'Test Steps'
+                                ? String(value).split(' | ').map((s,i)=><div key={i}>{i+1}. {s}</div>)
+                                : String(value)
+                              }
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 
           {/* ══ RESULTS ══ */}
-          {activeSection === 'results' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <h2 className="text-xl font-bold text-white">
-                  Test Results <span className="text-slate-400 font-normal text-base">({results.length})</span>
-                </h2>
-                <button onClick={() => downloadExcel(tests, results, bugs)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm">
-                  <Download size={14} /> Export CSV
-                </button>
+          {section === 'results' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
+                <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Results <span style={{ color:'#6b7fa3', fontWeight:400, fontSize:14 }}>({filteredRes.length}/{results.length})</span></h2>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button onClick={()=>downloadHTML(tests,results,bugs,selectedTCols,filter)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                    <Eye size={12}/> HTML with Screenshots
+                  </button>
+                  <button onClick={()=>downloadCSV_Results(results,selectedRCols,filter)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'none', background:'#16a34a22', color:'#4ade80', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                    <FileSpreadsheet size={12}/> Export CSV
+                  </button>
+                </div>
               </div>
 
-              {results.length === 0 ? (
-                <div className="text-center py-16 text-slate-500">
-                  <Clock size={40} className="mx-auto mb-3 text-slate-600" />
-                  <p>No results yet. Run your tests first.</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {results.map((r, i) => (
-                    <div key={i} className={`border rounded-xl overflow-hidden ${
-                      r.status === 'passed'
-                        ? 'bg-emerald-900/10 border-emerald-700/30'
-                        : 'bg-red-900/10 border-red-700/30'
-                    }`}>
-                      <div
-                        className="flex items-center justify-between p-3 cursor-pointer"
-                        onClick={() => setExpandedResult(expandedResult === i ? null : i)}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          {r.status === 'passed'
-                            ? <CheckCircle size={16} className="text-emerald-400 shrink-0" />
-                            : <XCircle    size={16} className="text-red-400 shrink-0" />
-                          }
-                          <span className="text-xs font-mono text-slate-500 shrink-0">{r.id}</span>
-                          <span className="text-sm text-slate-200 font-medium truncate">{r.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
-                          <span className="text-xs text-slate-400">{r.duration}ms</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full border font-bold ${statusColor(r.status)}`}>
-                            {(r.status||'').toUpperCase()}
-                          </span>
-                          {r.isRetest && (
-                            <span className="text-xs px-2 py-0.5 bg-blue-900/40 text-blue-300 border border-blue-700/40 rounded-full">
-                              Retest
-                            </span>
-                          )}
-                          {expandedResult === i
-                            ? <ChevronUp size={14} className="text-slate-400" />
-                            : <ChevronDown size={14} className="text-slate-400" />
-                          }
-                        </div>
-                      </div>
-
-                      {expandedResult === i && (
-                        <div className="border-t border-slate-700/50 p-4 space-y-3 bg-slate-900/30">
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                            {[
-                              ['Type',      r.type?.toUpperCase()],
-                              ['Duration',  `${r.duration}ms`],
-                              ['Timestamp', r.timestamp ? new Date(r.timestamp).toLocaleString() : '—'],
-                              ['Retest',    r.isRetest ? 'Yes' : 'No'],
-                            ].map(([k,v]) => (
-                              <div key={k} className="bg-slate-800/60 rounded-lg p-2">
-                                <div className="text-slate-500 mb-0.5">{k}</div>
-                                <div className="text-slate-200 font-medium">{v}</div>
-                              </div>
-                            ))}
-                          </div>
-                          {r.error && (
-                            <div>
-                              <div className="text-xs font-semibold text-red-400 mb-1">Error</div>
-                              <div className="text-sm text-red-300 bg-red-900/20 rounded-lg p-2.5">{r.error}</div>
-                            </div>
-                          )}
-                          {r.screenshot && (
-                            <div>
-                              <div className="text-xs font-semibold text-slate-400 mb-1">Screenshot</div>
-                              <div className="relative group">
-                                <img src={r.screenshot} alt="Screenshot"
-                                  className="w-full max-w-sm rounded-lg border border-slate-600 cursor-pointer hover:opacity-90"
-                                  onClick={() => window.open(r.screenshot, '_blank')}
-                                />
-                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <a href={r.screenshot} download={`${r.name}_screenshot.png`}
-                                    className="flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-xs rounded shadow">
-                                    <Download size={10} /> Save
-                                  </a>
-                                </div>
-                              </div>
-                              <p className="text-xs text-slate-500 mt-1">Click to view full size · Hover to download</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
+              {/* Stats */}
+              {results.length > 0 && (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+                  {[{l:'Passed',v:summary.passed,c:'#4ade80'},{l:'Failed',v:summary.failed,c:'#f87171'},{l:'Pass Rate',v:`${summary.passRate}%`,c:'#00d4aa'}].map(s=>(
+                    <div key={s.l} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:8, padding:'10px', textAlign:'center' }}>
+                      <div style={{ color:s.c, fontWeight:800, fontSize:20, fontFamily:'monospace' }}>{s.v}</div>
+                      <div style={{ color:'#6b7fa3', fontSize:11 }}>{s.l}</div>
                     </div>
                   ))}
                 </div>
               )}
+
+              {/* Status filter */}
+              <div style={{ display:'flex', gap:6 }}>
+                {['all','passed','failed'].map(f=>(
+                  <button key={f} onClick={()=>setFilter(p=>({...p,resultStatus:f==='all'?'':f}))}
+                    style={{ padding:'5px 14px', borderRadius:7, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background: (filter.resultStatus===f||(!filter.resultStatus&&f==='all')) ? '#00d4aa' : 'rgba(255,255,255,0.06)', color: (filter.resultStatus===f||(!filter.resultStatus&&f==='all')) ? '#0a0f1e' : '#6b7fa3' }}>
+                    {f==='all'?`All (${results.length})`:f==='passed'?`✓ ${summary.passed}`:`✗ ${summary.failed}`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Results list */}
+              {results.length===0 ? (
+                <div style={{ textAlign:'center', padding:'48px', color:'#6b7fa3' }}><Clock size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>Run your tests to see results here.</p></div>
+              ) : filteredRes.map((r,i)=>(
+                <div key={i} style={{ background: r.status==='passed'?'rgba(74,222,128,0.05)':'rgba(248,113,113,0.05)', border:`1px solid ${r.status==='passed'?'rgba(74,222,128,0.2)':'rgba(248,113,113,0.2)'}`, borderRadius:10, overflow:'hidden' }}>
+                  <div style={{ display:'flex', alignItems:'center', padding:'9px 12px', gap:10, cursor:'pointer' }} onClick={()=>setExpandedRes(expandedRes===i?null:i)}>
+                    {r.status==='passed' ? <CheckCircle size={14} style={{ color:'#4ade80', flexShrink:0 }}/> : <XCircle size={14} style={{ color:'#f87171', flexShrink:0 }}/>}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ color:'#f0f4ff', fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</div>
+                      <div style={{ color:'#6b7fa3', fontSize:10 }}>{r.duration}ms {r.isRetest&&'· Retest'}</div>
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      {r.screenshot && <button onClick={e=>{e.stopPropagation();dlScreenshot(r.screenshot,r.name);}} style={{ background:'none', border:'none', color:'#00d4aa', cursor:'pointer', padding:3 }} title="Download screenshot"><Image size={12}/></button>}
+                      <button onClick={e=>{e.stopPropagation(); const rows=[RES_COLS.map(c=>c.label),RES_COLS.map(c=>getResVal(r,c.key))]; dl(toCSV(rows),`Result_${i+1}.csv`,'text/csv;charset=utf-8');}} style={{ background:'none', border:'none', color:'#6b7fa3', cursor:'pointer', padding:3 }} title="Download this result"><Download size={12}/></button>
+                      {expandedRes===i?<ChevronUp size={13} style={{ color:'#6b7fa3' }}/>:<ChevronDown size={13} style={{ color:'#6b7fa3' }}/>}
+                    </div>
+                  </div>
+                  {expandedRes===i && (
+                    <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', padding:'10px 12px', background:'rgba(0,0,0,0.2)' }}>
+                      {r.error && <div style={{ color:'#f87171', fontSize:12, background:'rgba(248,113,113,0.1)', borderRadius:7, padding:'7px 10px', marginBottom:10 }}>{r.error}</div>}
+                      {r.screenshot && (
+                        <div>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                            <span style={{ color:'#6b7fa3', fontSize:11, fontWeight:600, textTransform:'uppercase' }}>📸 Screenshot</span>
+                            <button onClick={()=>dlScreenshot(r.screenshot,r.name)} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:6, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:11 }}>
+                              <Download size={10}/> Save PNG
+                            </button>
+                          </div>
+                          <img src={r.screenshot} alt={r.name} style={{ width:'100%', maxWidth:'100%', borderRadius:8, border:'1px solid rgba(0,212,170,0.15)', cursor:'pointer', display:'block' }} onClick={()=>window.open(r.screenshot,'_blank')}/>
+                          <p style={{ color:'#6b7fa3', fontSize:10, marginTop:4 }}>Click to open full size</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 
           {/* ══ BUGS ══ */}
-          {activeSection === 'bugs' && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-bold text-white">
-                Bug Reports <span className="text-slate-400 font-normal text-base">({bugs.length})</span>
-              </h2>
-              {bugs.length === 0 ? (
-                <div className="text-center py-16 text-slate-500">
-                  <Bug size={40} className="mx-auto mb-3 text-slate-600" />
-                  <p>No bugs reported yet.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {bugs.map((bug, i) => (
-                    <div key={i} className="bg-red-900/10 border border-red-700/30 rounded-xl p-4">
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div>
-                          <span className="text-xs font-mono font-bold text-red-400">{bug.jiraKey}</span>
-                          <h3 className="text-sm font-semibold text-slate-200 mt-0.5">{bug.summary}</h3>
-                        </div>
-                        <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full border font-medium ${
-                          bug.status === 'Open' ? 'bg-red-900/40 text-red-300 border-red-700/40' : 'bg-emerald-900/40 text-emerald-300 border-emerald-700/40'
-                        }`}>{bug.status}</span>
-                      </div>
-                      {bug.description && (
-                        <p className="text-xs text-slate-400 mb-3">{bug.description}</p>
-                      )}
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        {[
-                          ['Severity', bug.severity, priorityColor(bug.severity)],
-                          ['Priority', bug.priority, priorityColor(bug.priority)],
-                          ['Created',  bug.createdAt ? new Date(bug.createdAt).toLocaleDateString() : '—', 'bg-slate-700/40 text-slate-400 border-slate-600'],
-                        ].map(([k,v,cls]) => (
-                          <span key={k} className={`px-2 py-0.5 rounded-full border ${cls}`}>{k}: {v}</span>
-                        ))}
-                      </div>
+          {section === 'bugs' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Bug Reports ({bugs.length})</h2>
+                <button onClick={()=>downloadCSV_Bugs(bugs)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'none', background:'#16a34a22', color:'#4ade80', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                  <FileSpreadsheet size={12}/> Export CSV
+                </button>
+              </div>
+              {bugs.length===0 ? (
+                <div style={{ textAlign:'center', padding:'48px', color:'#6b7fa3' }}><Bug size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>No bugs reported.</p></div>
+              ) : bugs.map((bug,i)=>(
+                <div key={i} style={{ background:'rgba(248,113,113,0.05)', border:'1px solid rgba(248,113,113,0.2)', borderRadius:10, padding:'14px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+                    <div>
+                      <span style={{ color:'#f87171', fontFamily:'monospace', fontWeight:700, fontSize:12 }}>{bug.jiraKey}</span>
+                      <div style={{ color:'#f0f4ff', fontSize:13, fontWeight:600, marginTop:2 }}>{bug.summary}</div>
                     </div>
-                  ))}
+                    <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                      <span style={{ fontSize:11, padding:'2px 8px', borderRadius:20, background: bug.status==='Open'?'rgba(248,113,113,0.15)':'rgba(74,222,128,0.15)', color: bug.status==='Open'?'#f87171':'#4ade80' }}>{bug.status}</span>
+                      <button onClick={()=>{ const rows=[['Key','Summary','Severity','Priority','Status','Description'],[bug.jiraKey||'',bug.summary||'',bug.severity||'',bug.priority||'',bug.status||'',bug.description||'']]; dl(toCSV(rows),`Bug_${(bug.jiraKey||'bug').replace(/[^a-z0-9]/gi,'_')}.csv`,'text/csv;charset=utf-8'); }} style={{ background:'none', border:'none', color:'#6b7fa3', cursor:'pointer', padding:3 }}><Download size={12}/></button>
+                    </div>
+                  </div>
+                  {bug.description && <p style={{ color:'#94a3b8', fontSize:12, marginBottom:8 }}>{bug.description}</p>}
+                  <div style={{ display:'flex', gap:6, flexWrap:'wrap', fontSize:11 }}>
+                    {[['Severity',bug.severity],['Priority',bug.priority],['Created',bug.createdAt?new Date(bug.createdAt).toLocaleDateString():'—']].map(([k,v])=>(
+                      <span key={k} style={{ padding:'2px 8px', borderRadius:20, border:'1px solid rgba(255,255,255,0.1)', color:'#94a3b8' }}>{k}: {v}</span>
+                    ))}
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
           )}
 
           {/* ══ DOWNLOADS ══ */}
-          {activeSection === 'download' && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-bold text-white">Download Reports</h2>
-              <p className="text-slate-400 text-sm">
-                Download your complete test suite, results, and bug reports in multiple formats.
-                All files are generated instantly in your browser.
-              </p>
+          {section === 'downloads' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+              <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Download Reports</h2>
 
-              {/* Format cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {downloadOptions.map(opt => {
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:12 }}>
+                {[
+                  { label:'HTML Report (with Screenshots)', icon:Eye, color:'#00d4aa', bg:'rgba(0,212,170,0.1)', desc:'Self-contained HTML — screenshots embedded, steps column included', action:()=>downloadHTML(tests,results,bugs,selectedTCols,filter) },
+                  { label:'Excel / CSV (3 files)', icon:FileSpreadsheet, color:'#4ade80', bg:'rgba(74,222,128,0.1)', desc:`Test Cases, Results, Bugs — with steps column`, action:dlAll },
+                  { label:'PDF (via Print)', icon:Printer, color:'#f87171', bg:'rgba(248,113,113,0.1)', desc:'Formatted print-ready report — save as PDF', action:()=>downloadPDF(tests,results,bugs,selectedTCols,filter) },
+                  { label:'Word (.doc)', icon:FileText, color:'#60a5fa', bg:'rgba(96,165,250,0.1)', desc:'Full report — opens in Word/Google Docs — steps column included', action:()=>downloadWord(tests,results,bugs,selectedTCols) },
+                  { label:'XML', icon:FileCode, color:'#a78bfa', bg:'rgba(167,139,250,0.1)', desc:'Structured XML for TestRail, Xray, Zephyr import', action:()=>downloadXML(tests,results,bugs) },
+                  { label:'Test Cases CSV', icon:FileSpreadsheet, color:'#4ade80', bg:'rgba(74,222,128,0.08)', desc:`${allTests.length} test cases with all steps`, action:()=>downloadCSV_TC(tests,selectedTCols,filter) },
+                  { label:'Results CSV', icon:FileSpreadsheet, color:'#fbbf24', bg:'rgba(251,191,36,0.08)', desc:`${results.length} test results with durations`, action:()=>downloadCSV_Results(results,selectedRCols,filter) },
+                  { label:'Bugs CSV', icon:Bug, color:'#f87171', bg:'rgba(248,113,113,0.08)', desc:`${bugs.length} bug reports`, action:()=>downloadCSV_Bugs(bugs) },
+                ].map(opt => {
                   const Icon = opt.icon;
                   return (
-                    <div key={opt.label}
-                      className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 flex items-start gap-4">
-                      <div className={`p-3 rounded-xl ${opt.color} shrink-0`}>
-                        <Icon size={24} className="text-white" />
+                    <div key={opt.label} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px', display:'flex', gap:14, alignItems:'flex-start' }}>
+                      <div style={{ width:40, height:40, borderRadius:10, background:opt.bg, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                        <Icon size={20} style={{ color:opt.color }}/>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-white mb-1">{opt.label}</h3>
-                        <p className="text-xs text-slate-400 mb-3">{opt.desc}</p>
-                        <button onClick={opt.action}
-                          className={`flex items-center gap-2 px-4 py-2 ${opt.color} text-white rounded-lg text-sm font-medium w-full justify-center`}>
-                          <Download size={14} /> Download {opt.label}
+                      <div style={{ flex:1 }}>
+                        <div style={{ color:'#f0f4ff', fontWeight:700, fontSize:13, marginBottom:4 }}>{opt.label}</div>
+                        <div style={{ color:'#6b7fa3', fontSize:11, marginBottom:10 }}>{opt.desc}</div>
+                        <button onClick={opt.action} style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'none', background:opt.bg, color:opt.color, cursor:'pointer', fontSize:12, fontWeight:700, width:'100%', justifyContent:'center' }}>
+                          <Download size={12}/> Download
                         </button>
                       </div>
                     </div>
@@ -872,62 +889,55 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
                 })}
               </div>
 
-              {/* Individual test case downloads */}
-              <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5">
-                <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
-                  <Filter size={16} className="text-blue-400" /> Download by Type
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {/* Per-type CSV */}
+              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
+                <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700, marginBottom:12 }}>Download by Test Type</h3>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:8 }}>
                   {TYPES.map(type => {
-                    const list = tests[type] || [];
+                    const list = tests[type]||[];
                     if (!list.length) return null;
                     return (
-                      <button key={type}
-                        onClick={() => {
-                          const rows = [
-                            ['Test ID','Title','Priority','Description','Preconditions','Test Steps','Expected Result'],
-                            ...list.map(t => [t.id||'',t.name||'',t.priority||'',t.description||'',t.preconditions||'',t.testSteps||'',t.expectedResult||''])
-                          ];
-                          triggerDownload(toCSV(rows), `TestItNow_${type.toUpperCase()}_Tests.csv`, 'text/csv;charset=utf-8');
-                        }}
-                        className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-colors"
-                      >
-                        <Download size={13} className="text-slate-400" />
-                        <span className="uppercase font-mono text-xs">{type}</span>
-                        <span className="ml-auto text-xs text-slate-400">{list.length}</span>
+                      <button key={type} onClick={()=>{
+                        const rows = [
+                          ['Test ID','Title','Priority','Preconditions','Test Steps','Expected Result'],
+                          ...list.map(t=>[t.id||'',t.name||'',t.priority||'',(t.preconditions||''),(t.testSteps||'').split(' | ').map((s,i)=>`${i+1}. ${s}`).join('\n'),t.expectedResult||''])
+                        ];
+                        dl(toCSV(rows), `TestItNow_${type.toUpperCase()}.csv`, 'text/csv;charset=utf-8');
+                      }} style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 12px', borderRadius:9, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(255,255,255,0.04)', color:'#94a3b8', cursor:'pointer', fontSize:12, transition:'all 0.15s' }}
+                      onMouseEnter={e=>{ e.currentTarget.style.borderColor=TYPE_COLORS[type]+'55'; e.currentTarget.style.color=TYPE_COLORS[type]; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.borderColor='rgba(255,255,255,0.08)'; e.currentTarget.style.color='#94a3b8'; }}>
+                        <Download size={12}/> <span style={{ textTransform:'uppercase', fontWeight:600 }}>{type}</span>
+                        <span style={{ marginLeft:'auto', fontFamily:'monospace', fontWeight:700 }}>{list.length}</span>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Screenshots */}
-              {results.some(r => r.screenshot) && (
-                <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5">
-                  <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
-                    <Eye size={16} className="text-purple-400" /> Screenshots ({results.filter(r=>r.screenshot).length})
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {results.filter(r => r.screenshot).map((r, i) => (
-                      <div key={i} className="group relative rounded-lg overflow-hidden border border-slate-600">
-                        <img src={r.screenshot} alt={r.name}
-                          className="w-full rounded cursor-pointer hover:opacity-80"
-                          onClick={() => window.open(r.screenshot, '_blank')}
-                        />
-                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
-                          <span className={`text-xs font-bold ${r.status==='passed'?'text-emerald-400':'text-red-400'}`}>
-                            {(r.status||'').toUpperCase()}
-                          </span>
-                          <a href={r.screenshot}
-                            download={`${(r.name||'test').replace(/[^a-z0-9]/gi,'_')}_${i+1}.png`}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <Download size={12} /> Download
-                          </a>
+              {/* Screenshots gallery */}
+              {results.some(r=>r.screenshot) && (
+                <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                    <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700 }}>Screenshots ({results.filter(r=>r.screenshot).length})</h3>
+                    <button onClick={()=>results.filter(r=>r.screenshot).forEach((r,i)=>setTimeout(()=>dlScreenshot(r.screenshot,r.name),i*300))}
+                      style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                      <Download size={12}/> Download All PNGs
+                    </button>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:10 }}>
+                    {results.filter(r=>r.screenshot).map((r,i)=>(
+                      <div key={i} style={{ position:'relative', borderRadius:8, overflow:'hidden', border:'1px solid rgba(0,212,170,0.12)' }}
+                        onMouseEnter={e=>e.currentTarget.querySelector('.ss-overlay').style.opacity='1'}
+                        onMouseLeave={e=>e.currentTarget.querySelector('.ss-overlay').style.opacity='0'}>
+                        <img src={r.screenshot} alt={r.name} style={{ width:'100%', display:'block', cursor:'pointer' }} onClick={()=>window.open(r.screenshot,'_blank')}/>
+                        <div className="ss-overlay" style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.6)', opacity:0, transition:'opacity 0.2s', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8 }}>
+                          <span style={{ color: r.status==='passed'?'#4ade80':'#f87171', fontSize:12, fontWeight:700 }}>{(r.status||'').toUpperCase()}</span>
+                          <button onClick={e=>{e.stopPropagation();dlScreenshot(r.screenshot,r.name);}} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:7, border:'none', background:'#00d4aa', color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                            <Download size={11}/> PNG
+                          </button>
                         </div>
-                        <div className="p-2 bg-slate-800/80">
-                          <p className="text-xs text-slate-400 truncate">{r.name}</p>
+                        <div style={{ padding:'6px 8px', background:'#0d1530' }}>
+                          <p style={{ color:'#94a3b8', fontSize:11, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</p>
                         </div>
                       </div>
                     ))}
@@ -937,8 +947,62 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
             </div>
           )}
 
+          {/* ══ TEMPLATES ══ */}
+          {section === 'templates' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+              <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Templates</h2>
+
+              {/* Upload */}
+              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
+                <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700, marginBottom:8 }}>Upload Your Template</h3>
+                <p style={{ color:'#6b7fa3', fontSize:12, marginBottom:14 }}>Upload a CSV with your column names — we'll map our data to your format and export.</p>
+                <label style={{ display:'block', border:'2px dashed rgba(0,212,170,0.2)', borderRadius:12, padding:'28px', textAlign:'center', cursor:'pointer', marginBottom:12, transition:'border-color 0.2s' }}
+                  onMouseEnter={e=>e.target.style.borderColor='rgba(0,212,170,0.5)'}
+                  onMouseLeave={e=>e.target.style.borderColor='rgba(0,212,170,0.2)'}>
+                  <Upload size={28} style={{ color:'#6b7fa3', display:'block', margin:'0 auto 8px' }}/>
+                  <p style={{ color:'#94a3b8', fontSize:13 }}>Click to upload CSV template</p>
+                  <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleTemplate} style={{ display:'none' }}/>
+                </label>
+                {templateName && (
+                  <div style={{ background:'rgba(0,212,170,0.08)', border:'1px solid rgba(0,212,170,0.25)', borderRadius:9, padding:'10px 14px', marginBottom:10, display:'flex', alignItems:'center', gap:10 }}>
+                    <CheckCircle size={15} style={{ color:'#00d4aa' }}/>
+                    <span style={{ color:'#00d4aa', fontSize:12, fontWeight:600 }}>Template ready: {templateName}</span>
+                    <button onClick={dlWithTemplate} style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:7, border:'none', background:'#00d4aa', color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                      <Download size={11}/> Export
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Download templates */}
+              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
+                <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700, marginBottom:12 }}>Download Template Files</h3>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  {[
+                    { label:'Test Cases Template', desc:'ID, Title, Type, Priority, Steps, Expected', fn:()=>dl('\uFEFF'+toCSV([['Test Case ID','Title','Description','Type','Priority','Preconditions','Test Steps','Test Data','Expected Result','URL'],['TC-001','Login with valid credentials','Test login','ui','Critical','Login page open','1. Enter email | 2. Enter password | 3. Click Login','Email: test@test.com','Login succeeds | Redirect to dashboard','https://app.com/login']]), 'TestCases_Template.csv','text/csv;charset=utf-8') },
+                    { label:'Results Template', desc:'ID, Name, Status, Duration, Error', fn:()=>dl('\uFEFF'+toCSV([['Test ID','Test Name','Type','Status','Duration (ms)','Timestamp','Error Message'],['TC-001','Login valid','ui','passed','1234','2024-06-15 10:30','']]), 'Results_Template.csv','text/csv;charset=utf-8') },
+                    { label:'Bug Report Template', desc:'Key, Summary, Severity, Priority, Steps', fn:()=>dl('\uFEFF'+toCSV([['Bug Key','Summary','Severity','Priority','Status','Description'],['BUG-001','Login button broken on mobile','Major','High','Open','Login button unresponsive on iOS Safari']]), 'BugReport_Template.csv','text/csv;charset=utf-8') },
+                    { label:'Import Template', desc:'Use to import existing test cases', fn:()=>dl('\uFEFF'+toCSV([['Test Case ID','Title','Description','Type','Priority','Test Steps','Expected Result'],['TC-001','Sample Test','Description','api','High','1. Do step 1 | 2. Do step 2','Result expected']]), 'Import_Template.csv','text/csv;charset=utf-8') },
+                  ].map(t=>(
+                    <div key={t.label} style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'14px' }}>
+                      <div style={{ color:'#f0f4ff', fontSize:13, fontWeight:600, marginBottom:4 }}>{t.label}</div>
+                      <div style={{ color:'#6b7fa3', fontSize:11, marginBottom:10 }}>{t.desc}</div>
+                      <button onClick={t.fn} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.04)', color:'#94a3b8', cursor:'pointer', fontSize:12, width:'100%', justifyContent:'center' }}>
+                        <Download size={11}/> Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
     </div>
   );
+}
+
+function Printer({ size, style }) {
+  return <svg width={size} height={size} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>;
 }
