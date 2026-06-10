@@ -9,7 +9,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Sparkles, Play, Download, FileText, FileSpreadsheet,
   FileCode, Upload, Plus, Trash2, CheckCircle, XCircle,
-  Bug, RotateCcw, ChevronDown, ChevronUp, Search,
+  Bug, RotateCcw, ChevronDown, ChevronUp, ChevronRight, Search,
   BarChart2, LogOut, Crown, Globe, Github, GitBranch,
   Database, Lock, Monitor, Code, TrendingUp, X,
   Layers, FileUp, Cloud, Terminal, Image, Package,
