@@ -244,11 +244,13 @@ export const testEngineService = {
   },
 
   // ── Run tests ─────────────────────────────────────────────
-  async runTests(testList, onTestComplete) {
+  async runTests(testList, onTestComplete, siteUrl = '') {
     const data = await apiFetch(`${BASE}/run`, { method:'POST', body:{ tests:testList } });
     for (const result of data.results) {
       await new Promise(r => setTimeout(r, 60));
-      result.screenshot = await captureScreenshot(result);
+      // Use the test's own URL or fall back to the analyzed site URL
+      const screenshotUrl = result.url || siteUrl || '';
+      result.screenshot = await captureScreenshot({ ...result, url: screenshotUrl });
       if (onTestComplete) onTestComplete(result);
     }
     return data.results;

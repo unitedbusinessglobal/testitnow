@@ -52,6 +52,7 @@ export default function App() {
   const [isRunning, setIsRunning]   = useState(false);
   const [currentTest, setCurrentTest] = useState(null);
   const [activeTab, setActiveTab]   = useState('unit');
+  const [analyzedUrl, setAnalyzedUrl] = useState('');
 
   // ── Bug state ────────────────────────────────────────────
   const [bugs, setBugs] = useState([]);
@@ -183,6 +184,10 @@ export default function App() {
         count += list.length;
       });
 
+      // Store the URL being tested for screenshots
+      if (sourceParams.url) setAnalyzedUrl(sourceParams.url);
+      else if (meta?.domain) setAnalyzedUrl(`https://${meta.domain}`);
+
       setModal(null);
       setIsGenerating(false);
 
@@ -219,7 +224,7 @@ export default function App() {
     await testEngineService.runTests(flat, result => {
       setCurrentTest(result);
       setResults(prev => [...prev, result]);
-    });
+    }, analyzedUrl);
 
     setCurrentTest(null);
     setIsRunning(false);
@@ -339,6 +344,7 @@ export default function App() {
           tests={tests}
           results={results}
           bugs={bugs}
+          theme={theme}
           onBack={() => setCurrentView('main')}
         />
       )}

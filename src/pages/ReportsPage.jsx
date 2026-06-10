@@ -3,6 +3,7 @@
 // Fixed: steps column, HTML report, screenshots, all downloads
 // ============================================================
 import React, { useState, useMemo, useRef } from 'react';
+import { getTheme } from '../lib/theme';
 import {
   Download, FileSpreadsheet, FileText, FileCode, File,
   CheckCircle, XCircle, Clock, AlertTriangle, Filter,
@@ -486,7 +487,8 @@ function applyResFilter(results, filter) {
 // ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
-export default function ReportsPage({ tests, results, bugs, onBack }) {
+export default function ReportsPage({ tests, results, bugs, onBack, theme = 'light' }) {
+  const T = getTheme(theme);
   const [section,       setSection]       = useState('overview');
   const [filter,        setFilter]        = useState({ type:'', priority:'', resultStatus:'', search:'' });
   const [selectedTCols, setSelectedTCols] = useState(TC_COLS.map(c=>c.key));
@@ -557,25 +559,25 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
   };
 
   return (
-    <div className="min-h-screen font-sans" style={{ background:'#0a0f1e', color:'#f0f4ff', display:'flex', flexDirection:'column' }}>
+    <div className="min-h-screen font-sans" style={{ background:T.bg, color:T.text, display:'flex', flexDirection:'column' }}>
       {/* Top bar */}
-      <div style={{ background:'#0d1530', borderBottom:'1px solid rgba(0,212,170,0.12)', padding:'10px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0, zIndex:50 }}>
+      <div style={{ background:T.sidebar, borderBottom:'1px solid rgba(0,212,170,0.12)', padding:'10px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', position:'sticky', top:0, zIndex:50 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <button onClick={onBack} style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:'#6b7fa3', cursor:'pointer', fontSize:13 }}>
+          <button onClick={onBack} style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', color:T.textMuted, cursor:'pointer', fontSize:13 }}>
             <ArrowLeft size={15}/> Back
           </button>
           <div style={{ width:1, height:20, background:'rgba(255,255,255,0.1)' }}/>
-          <span style={{ color:'#f0f4ff', fontWeight:700, fontSize:15, display:'flex', alignItems:'center', gap:6 }}>
-            <FileText size={16} style={{ color:'#00d4aa' }}/> Reports & Downloads
+          <span style={{ color:T.text, fontWeight:700, fontSize:15, display:'flex', alignItems:'center', gap:6 }}>
+            <FileText size={16} style={{ color:T.accent }}/> Reports & Downloads
           </span>
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button onClick={() => downloadHTML(tests, results, bugs, selectedTCols, filter)}
-            style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'1px solid rgba(0,212,170,0.3)', background:T.accentDim, color:T.accent, cursor:'pointer', fontSize:12, fontWeight:600 }}>
             <Eye size={13}/> HTML Report
           </button>
           <button onClick={dlAll}
-            style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'none', background:'linear-gradient(135deg,#00d4aa,#3b82f6)', color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'none', background:`linear-gradient(135deg,${T.accent},${T.blue})`, color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
             <Download size={13}/> Download All
           </button>
         </div>
@@ -583,60 +585,60 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
 
       <div style={{ display:'flex', flex:1 }}>
         {/* Sidebar */}
-        <div style={{ width:180, background:'#0d1530', borderRight:'1px solid rgba(0,212,170,0.12)', padding:'10px 8px', flexShrink:0 }}>
+        <div style={{ width:180, background:T.sidebar, borderRight:'1px solid rgba(0,212,170,0.12)', padding:'10px 8px', flexShrink:0 }}>
           {navItems.map(item => {
             const Icon = item.icon;
             const on   = section === item.id;
             return (
               <button key={item.id} onClick={()=>setSection(item.id)} style={{
                 width:'100%', display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', marginBottom:2, fontSize:13, fontWeight: on?600:400,
-                background: on ? 'rgba(0,212,170,0.1)' : 'transparent',
-                color: on ? '#00d4aa' : '#94a3b8',
-                borderLeft: `2px solid ${on ? '#00d4aa' : 'transparent'}`,
+                background: on ? T.accentDim : 'transparent',
+                color: on ? T.accent : T.textSub,
+                borderLeft: `2px solid ${on ? T.accent : 'transparent'}`,
               }}>
                 <Icon size={14}/>
                 <span style={{ flex:1, textAlign:'left' }}>{item.label}</span>
-                {item.badge > 0 && <span style={{ fontSize:10, fontWeight:700, padding:'1px 5px', borderRadius:10, background: on ? '#00d4aa' : 'rgba(255,255,255,0.08)', color: on ? '#0a0f1e' : '#6b7fa3' }}>{item.badge}</span>}
+                {item.badge > 0 && <span style={{ fontSize:10, fontWeight:700, padding:'1px 5px', borderRadius:10, background: on ? T.accent : T.border, color: on ? '#fff' : T.textMuted }}>{item.badge}</span>}
               </button>
             );
           })}
         </div>
 
         {/* Main content */}
-        <div style={{ flex:1, padding:'20px 24px', overflowY:'auto' }}>
+        <div style={{ flex:1, padding:'20px 24px', overflowY:'auto', background:T.bg }}>
 
           {/* ══ OVERVIEW ══ */}
           {section === 'overview' && (
             <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-              <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Overview</h2>
+              <h2 style={{ fontSize:18, fontWeight:800, color:T.text }}>Overview</h2>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))', gap:10 }}>
                 {[
-                  { label:'Total Tests', val:allTests.length,  color:'#f0f4ff' },
+                  { label:'Total Tests', val:allTests.length,  color:T.text },
                   { label:'Passed',      val:summary.passed,   color:'#4ade80' },
                   { label:'Failed',      val:summary.failed,   color:'#f87171' },
-                  { label:'Pass Rate',   val:`${summary.passRate}%`, color:'#00d4aa' },
+                  { label:'Pass Rate',   val:`${summary.passRate}%`, color:T.accent },
                   { label:'Bugs',        val:bugs.length,      color:'#f87171' },
                   { label:'Critical',    val:allTests.filter(t=>t.priority==='Critical').length, color:'#f87171' },
                 ].map(s => (
-                  <div key={s.label} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.12)', borderRadius:10, padding:'12px', textAlign:'center' }}>
+                  <div key={s.label} style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, padding:'12px', textAlign:'center' }}>
                     <div style={{ color:s.color, fontWeight:800, fontSize:22, fontFamily:'monospace' }}>{s.val}</div>
-                    <div style={{ color:'#6b7fa3', fontSize:11, marginTop:3 }}>{s.label}</div>
+                    <div style={{ color:T.textMuted, fontSize:11, marginTop:3 }}>{s.label}</div>
                   </div>
                 ))}
               </div>
 
-              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.12)', borderRadius:12, padding:'16px' }}>
-                <h3 style={{ fontSize:13, fontWeight:600, color:'#94a3b8', marginBottom:12 }}>By Type</h3>
+              <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:12, padding:'16px' }}>
+                <h3 style={{ fontSize:13, fontWeight:600, color:T.textSub, marginBottom:12 }}>By Type</h3>
                 {TYPES.map(type => {
                   const cnt = (tests[type]||[]).length;
                   const pct = allTests.length ? Math.round(cnt/allTests.length*100) : 0;
                   return (
                     <div key={type} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
-                      <span style={{ color:'#6b7fa3', fontSize:11, fontFamily:'monospace', textTransform:'uppercase', width:80 }}>{type}</span>
-                      <div style={{ flex:1, background:'rgba(255,255,255,0.06)', borderRadius:4, height:6 }}>
+                      <span style={{ color:T.textMuted, fontSize:11, fontFamily:'monospace', textTransform:'uppercase', width:80 }}>{type}</span>
+                      <div style={{ flex:1, background:T.bgHover, borderRadius:4, height:6 }}>
                         <div style={{ height:'100%', borderRadius:4, background:TYPE_COLORS[type], width:`${pct}%` }}/>
                       </div>
-                      <span style={{ color:'#94a3b8', fontSize:11, width:30, textAlign:'right' }}>{cnt}</span>
+                      <span style={{ color:T.textSub, fontSize:11, width:30, textAlign:'right' }}>{cnt}</span>
                     </div>
                   );
                 })}
@@ -648,10 +650,10 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
           {section === 'testcases' && (
             <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
-                <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Test Cases <span style={{ color:'#6b7fa3', fontWeight:400, fontSize:14 }}>({filteredTests.length}/{allTests.length})</span></h2>
+                <h2 style={{ fontSize:18, fontWeight:800, color:T.text }}>Test Cases <span style={{ color:T.textMuted, fontWeight:400, fontSize:14 }}>({filteredTests.length}/{allTests.length})</span></h2>
                 <div style={{ display:'flex', gap:8 }}>
                   <button onClick={()=>setShowColPicker(showColPicker==='tc'?false:'tc')}
-                    style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#94a3b8', cursor:'pointer', fontSize:12 }}>
+                    style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:`1px solid ${T.border}`, background:T.bgHover, color:T.textSub, cursor:'pointer', fontSize:12 }}>
                     <Settings size={12}/> Columns ({selectedTCols.length})
                   </button>
                   <button onClick={()=>downloadCSV_TC(tests,selectedTCols,filter)}
@@ -663,13 +665,13 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
 
               {/* Column picker */}
               {showColPicker === 'tc' && (
-                <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.2)', borderRadius:12, padding:'14px' }}>
+                <div style={{ background:T.bgCard, border:'1px solid rgba(0,212,170,0.2)', borderRadius:12, padding:'14px' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-                    <span style={{ color:'#f0f4ff', fontSize:13, fontWeight:600 }}>Choose columns (Test Steps included by default)</span>
+                    <span style={{ color:T.text, fontSize:13, fontWeight:600 }}>Choose columns (Test Steps included by default)</span>
                     <div style={{ display:'flex', gap:6 }}>
                       <button onClick={()=>setSelectedTCols(TC_COLS.map(c=>c.key))} style={{ fontSize:11, padding:'3px 10px', borderRadius:6, border:'none', background:'rgba(59,130,246,0.2)', color:'#60a5fa', cursor:'pointer' }}>All</button>
-                      <button onClick={()=>setSelectedTCols(['id','name','type','priority','testSteps','expectedResult'])} style={{ fontSize:11, padding:'3px 10px', borderRadius:6, border:'none', background:'rgba(255,255,255,0.06)', color:'#94a3b8', cursor:'pointer' }}>Default</button>
-                      <button onClick={()=>setShowColPicker(false)} style={{ background:'none', border:'none', color:'#6b7fa3', cursor:'pointer' }}><X size={13}/></button>
+                      <button onClick={()=>setSelectedTCols(['id','name','type','priority','testSteps','expectedResult'])} style={{ fontSize:11, padding:'3px 10px', borderRadius:6, border:'none', background:T.bgHover, color:T.textSub, cursor:'pointer' }}>Default</button>
+                      <button onClick={()=>setShowColPicker(false)} style={{ background:'none', border:'none', color:T.textMuted, cursor:'pointer' }}><X size={13}/></button>
                     </div>
                   </div>
                   <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
@@ -684,20 +686,20 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
               )}
 
               {/* Filters */}
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap', background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:10, padding:'10px 12px' }}>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, padding:'10px 12px' }}>
                 <div style={{ position:'relative', flex:1, minWidth:160 }}>
-                  <Search size={12} style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:'#6b7fa3' }}/>
+                  <Search size={12} style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:T.textMuted }}/>
                   <input value={filter.search} onChange={e=>setFilter(p=>({...p,search:e.target.value}))} placeholder="Search tests…"
-                    style={{ width:'100%', paddingLeft:28, paddingRight:8, paddingTop:6, paddingBottom:6, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:7, color:'#f0f4ff', fontSize:12, outline:'none', fontFamily:'inherit' }}/>
+                    style={{ width:'100%', paddingLeft:28, paddingRight:8, paddingTop:6, paddingBottom:6, background:T.bgHover, border:`1px solid ${T.border}`, borderRadius:7, color:T.text, fontSize:12, outline:'none', fontFamily:'inherit' }}/>
                 </div>
                 {[{k:'type',opts:['','ui','api','security','performance','database','unit'],l:'All Types'},{k:'priority',opts:['','Critical','High','Medium','Low'],l:'All Priorities'}].map(({k,opts,l})=>(
                   <select key={k} value={filter[k]} onChange={e=>setFilter(p=>({...p,[k]:e.target.value}))}
-                    style={{ padding:'6px 10px', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:7, color:'#f0f4ff', fontSize:12, outline:'none' }}>
-                    {opts.map(o=><option key={o} value={o} style={{ background:'#111b3a' }}>{o||l}</option>)}
+                    style={{ padding:'6px 10px', background:T.bgHover, border:`1px solid ${T.border}`, borderRadius:7, color:T.text, fontSize:12, outline:'none' }}>
+                    {opts.map(o=><option key={o} value={o} style={{ background:T.bgCard }}>{o||l}</option>)}
                   </select>
                 ))}
                 {(filter.type||filter.priority||filter.search) && (
-                  <button onClick={()=>setFilter({type:'',priority:'',resultStatus:'',search:''})} style={{ display:'flex', alignItems:'center', gap:4, padding:'6px 10px', border:'1px solid rgba(255,255,255,0.1)', borderRadius:7, background:'transparent', color:'#6b7fa3', cursor:'pointer', fontSize:12 }}>
+                  <button onClick={()=>setFilter({type:'',priority:'',resultStatus:'',search:''})} style={{ display:'flex', alignItems:'center', gap:4, padding:'6px 10px', border:`1px solid ${T.border}`, borderRadius:7, background:'transparent', color:T.textMuted, cursor:'pointer', fontSize:12 }}>
                     <X size={11}/> Clear
                   </button>
                 )}
@@ -705,32 +707,32 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
 
               {/* Test list */}
               {filteredTests.length === 0 ? (
-                <div style={{ textAlign:'center', padding:'48px', color:'#6b7fa3' }}><AlertTriangle size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>No tests match your filters.</p></div>
+                <div style={{ textAlign:'center', padding:'48px', color:T.textMuted }}><AlertTriangle size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>No tests match your filters.</p></div>
               ) : filteredTests.map(test => (
-                <div key={test.id} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:10, overflow:'hidden' }}>
+                <div key={test.id} style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:10, overflow:'hidden' }}>
                   <div style={{ display:'flex', alignItems:'center', padding:'9px 12px', gap:10, cursor:'pointer' }} onClick={()=>setExpandedTC(expandedTC===test.id?null:test.id)}>
                     <div style={{ width:3, height:24, borderRadius:2, background:TYPE_COLORS[test.type]||'#6b7fa3', flexShrink:0 }}/>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ color:'#f0f4ff', fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{test.name}</div>
-                      <div style={{ color:'#6b7fa3', fontSize:10 }}>{test.id}</div>
+                      <div style={{ color:T.text, fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{test.name}</div>
+                      <div style={{ color:T.textMuted, fontSize:10 }}>{test.id}</div>
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                       <span style={{ fontSize:10, padding:'2px 7px', borderRadius:20, border:'1px solid', ...(() => {
                         const m = { Critical:'rgba(239,68,68,0.15) #f87171 rgba(239,68,68,0.3)', High:'rgba(249,115,22,0.15) #fb923c rgba(249,115,22,0.3)', Medium:'rgba(234,179,8,0.15) #fbbf24 rgba(234,179,8,0.3)', Low:'rgba(74,222,128,0.15) #4ade80 rgba(74,222,128,0.3)' }[test.priority]||'rgba(255,255,255,0.06) #6b7fa3 rgba(255,255,255,0.1)';
                         const [bg,col,border] = m.split(' '); return { background:bg, color:col, borderColor:border };
                       })() }}>{test.priority}</span>
-                      <span style={{ fontSize:10, padding:'2px 6px', borderRadius:4, background:'rgba(255,255,255,0.06)', color:'#94a3b8' }}>{test.type}</span>
-                      <button onClick={e=>{e.stopPropagation(); const rows=[TC_COLS.map(c=>c.label),TC_COLS.map(c=>getTestVal(test,c.key))]; dl(toCSV(rows),`TC_${(test.id||'tc').replace(/[^a-z0-9]/gi,'_')}.csv`,'text/csv;charset=utf-8');}} style={{ background:'none', border:'none', color:'#00d4aa', cursor:'pointer', padding:3 }} title="Download this test"><Download size={12}/></button>
-                      {expandedTC===test.id?<ChevronUp size={13} style={{ color:'#6b7fa3' }}/>:<ChevronDown size={13} style={{ color:'#6b7fa3' }}/>}
+                      <span style={{ fontSize:10, padding:'2px 6px', borderRadius:4, background:T.bgHover, color:T.textSub }}>{test.type}</span>
+                      <button onClick={e=>{e.stopPropagation(); const rows=[TC_COLS.map(c=>c.label),TC_COLS.map(c=>getTestVal(test,c.key))]; dl(toCSV(rows),`TC_${(test.id||'tc').replace(/[^a-z0-9]/gi,'_')}.csv`,'text/csv;charset=utf-8');}} style={{ background:'none', border:'none', color:T.accent, cursor:'pointer', padding:3 }} title="Download this test"><Download size={12}/></button>
+                      {expandedTC===test.id?<ChevronUp size={13} style={{ color:T.textMuted }}/>:<ChevronDown size={13} style={{ color:T.textMuted }}/>}
                     </div>
                   </div>
                   {expandedTC === test.id && (
-                    <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', padding:'12px', background:'rgba(0,0,0,0.2)' }}>
+                    <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', padding:'12px', background:T.bgHover }}>
                       {[['Description',test.description],['Preconditions',test.preconditions],['Test Steps',test.testSteps],['Test Data',test.testData],['Expected Result',test.expectedResult]]
                         .filter(([,v])=>v).map(([label,value])=>(
                           <div key={label} style={{ marginBottom:10 }}>
-                            <div style={{ color:'#6b7fa3', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4 }}>{label}</div>
-                            <div style={{ color:'#d1d9f0', fontSize:12, background:'rgba(255,255,255,0.04)', borderRadius:7, padding:'8px 10px', lineHeight:1.7 }}>
+                            <div style={{ color:T.textMuted, fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4 }}>{label}</div>
+                            <div style={{ color:T.text, fontSize:12, background:T.bgHover, borderRadius:7, padding:'8px 10px', lineHeight:1.7 }}>
                               {label === 'Test Steps'
                                 ? String(value).split(' | ').map((s,i)=><div key={i}>{i+1}. {s}</div>)
                                 : String(value)
@@ -749,9 +751,9 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
           {section === 'results' && (
             <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
-                <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Results <span style={{ color:'#6b7fa3', fontWeight:400, fontSize:14 }}>({filteredRes.length}/{results.length})</span></h2>
+                <h2 style={{ fontSize:18, fontWeight:800, color:T.text }}>Results <span style={{ color:T.textMuted, fontWeight:400, fontSize:14 }}>({filteredRes.length}/{results.length})</span></h2>
                 <div style={{ display:'flex', gap:8 }}>
-                  <button onClick={()=>downloadHTML(tests,results,bugs,selectedTCols,filter)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                  <button onClick={()=>downloadHTML(tests,results,bugs,selectedTCols,filter)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(0,212,170,0.3)', background:T.accentDim, color:T.accent, cursor:'pointer', fontSize:12, fontWeight:600 }}>
                     <Eye size={12}/> HTML with Screenshots
                   </button>
                   <button onClick={()=>downloadCSV_Results(results,selectedRCols,filter)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'none', background:'#16a34a22', color:'#4ade80', cursor:'pointer', fontSize:12, fontWeight:600 }}>
@@ -764,9 +766,9 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
               {results.length > 0 && (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
                   {[{l:'Passed',v:summary.passed,c:'#4ade80'},{l:'Failed',v:summary.failed,c:'#f87171'},{l:'Pass Rate',v:`${summary.passRate}%`,c:'#00d4aa'}].map(s=>(
-                    <div key={s.l} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:8, padding:'10px', textAlign:'center' }}>
+                    <div key={s.l} style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:8, padding:'10px', textAlign:'center' }}>
                       <div style={{ color:s.c, fontWeight:800, fontSize:20, fontFamily:'monospace' }}>{s.v}</div>
-                      <div style={{ color:'#6b7fa3', fontSize:11 }}>{s.l}</div>
+                      <div style={{ color:T.textMuted, fontSize:11 }}>{s.l}</div>
                     </div>
                   ))}
                 </div>
@@ -784,34 +786,34 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
 
               {/* Results list */}
               {results.length===0 ? (
-                <div style={{ textAlign:'center', padding:'48px', color:'#6b7fa3' }}><Clock size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>Run your tests to see results here.</p></div>
+                <div style={{ textAlign:'center', padding:'48px', color:T.textMuted }}><Clock size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>Run your tests to see results here.</p></div>
               ) : filteredRes.map((r,i)=>(
-                <div key={i} style={{ background: r.status==='passed'?'rgba(74,222,128,0.05)':'rgba(248,113,113,0.05)', border:`1px solid ${r.status==='passed'?'rgba(74,222,128,0.2)':'rgba(248,113,113,0.2)'}`, borderRadius:10, overflow:'hidden' }}>
+                <div key={i} style={{ background: r.status==='passed'?'rgba(74,222,128,0.07)':'rgba(248,113,113,0.07)', border:`1px solid ${r.status==='passed'?'rgba(74,222,128,0.2)':'rgba(248,113,113,0.2)'}`, borderRadius:10, overflow:'hidden' }}>
                   <div style={{ display:'flex', alignItems:'center', padding:'9px 12px', gap:10, cursor:'pointer' }} onClick={()=>setExpandedRes(expandedRes===i?null:i)}>
                     {r.status==='passed' ? <CheckCircle size={14} style={{ color:'#4ade80', flexShrink:0 }}/> : <XCircle size={14} style={{ color:'#f87171', flexShrink:0 }}/>}
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ color:'#f0f4ff', fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</div>
-                      <div style={{ color:'#6b7fa3', fontSize:10 }}>{r.duration}ms {r.isRetest&&'· Retest'}</div>
+                      <div style={{ color:T.text, fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</div>
+                      <div style={{ color:T.textMuted, fontSize:10 }}>{r.duration}ms {r.isRetest&&'· Retest'}</div>
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      {r.screenshot && <button onClick={e=>{e.stopPropagation();dlScreenshot(r.screenshot,r.name);}} style={{ background:'none', border:'none', color:'#00d4aa', cursor:'pointer', padding:3 }} title="Download screenshot"><Image size={12}/></button>}
-                      <button onClick={e=>{e.stopPropagation(); const rows=[RES_COLS.map(c=>c.label),RES_COLS.map(c=>getResVal(r,c.key))]; dl(toCSV(rows),`Result_${i+1}.csv`,'text/csv;charset=utf-8');}} style={{ background:'none', border:'none', color:'#6b7fa3', cursor:'pointer', padding:3 }} title="Download this result"><Download size={12}/></button>
-                      {expandedRes===i?<ChevronUp size={13} style={{ color:'#6b7fa3' }}/>:<ChevronDown size={13} style={{ color:'#6b7fa3' }}/>}
+                      {r.screenshot && <button onClick={e=>{e.stopPropagation();dlScreenshot(r.screenshot,r.name);}} style={{ background:'none', border:'none', color:T.accent, cursor:'pointer', padding:3 }} title="Download screenshot"><Image size={12}/></button>}
+                      <button onClick={e=>{e.stopPropagation(); const rows=[RES_COLS.map(c=>c.label),RES_COLS.map(c=>getResVal(r,c.key))]; dl(toCSV(rows),`Result_${i+1}.csv`,'text/csv;charset=utf-8');}} style={{ background:'none', border:'none', color:T.textMuted, cursor:'pointer', padding:3 }} title="Download this result"><Download size={12}/></button>
+                      {expandedRes===i?<ChevronUp size={13} style={{ color:T.textMuted }}/>:<ChevronDown size={13} style={{ color:T.textMuted }}/>}
                     </div>
                   </div>
                   {expandedRes===i && (
-                    <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', padding:'10px 12px', background:'rgba(0,0,0,0.2)' }}>
+                    <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', padding:'10px 12px', background:T.bgHover }}>
                       {r.error && <div style={{ color:'#f87171', fontSize:12, background:'rgba(248,113,113,0.1)', borderRadius:7, padding:'7px 10px', marginBottom:10 }}>{r.error}</div>}
                       {r.screenshot && (
                         <div>
                           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-                            <span style={{ color:'#6b7fa3', fontSize:11, fontWeight:600, textTransform:'uppercase' }}>📸 Screenshot</span>
-                            <button onClick={()=>dlScreenshot(r.screenshot,r.name)} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:6, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:11 }}>
+                            <span style={{ color:T.textMuted, fontSize:11, fontWeight:600, textTransform:'uppercase' }}>📸 Screenshot</span>
+                            <button onClick={()=>dlScreenshot(r.screenshot,r.name)} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:6, border:'1px solid rgba(0,212,170,0.3)', background:T.accentDim, color:T.accent, cursor:'pointer', fontSize:11 }}>
                               <Download size={10}/> Save PNG
                             </button>
                           </div>
                           <img src={r.screenshot} alt={r.name} style={{ width:'100%', maxWidth:'100%', borderRadius:8, border:'1px solid rgba(0,212,170,0.15)', cursor:'pointer', display:'block' }} onClick={()=>window.open(r.screenshot,'_blank')}/>
-                          <p style={{ color:'#6b7fa3', fontSize:10, marginTop:4 }}>Click to open full size</p>
+                          <p style={{ color:T.textMuted, fontSize:10, marginTop:4 }}>Click to open full size</p>
                         </div>
                       )}
                     </div>
@@ -825,29 +827,29 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
           {section === 'bugs' && (
             <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Bug Reports ({bugs.length})</h2>
+                <h2 style={{ fontSize:18, fontWeight:800, color:T.text }}>Bug Reports ({bugs.length})</h2>
                 <button onClick={()=>downloadCSV_Bugs(bugs)} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'none', background:'#16a34a22', color:'#4ade80', cursor:'pointer', fontSize:12, fontWeight:600 }}>
                   <FileSpreadsheet size={12}/> Export CSV
                 </button>
               </div>
               {bugs.length===0 ? (
-                <div style={{ textAlign:'center', padding:'48px', color:'#6b7fa3' }}><Bug size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>No bugs reported.</p></div>
+                <div style={{ textAlign:'center', padding:'48px', color:T.textMuted }}><Bug size={32} style={{ margin:'0 auto 10px', display:'block', opacity:0.4 }}/><p style={{ fontSize:13 }}>No bugs reported.</p></div>
               ) : bugs.map((bug,i)=>(
                 <div key={i} style={{ background:'rgba(248,113,113,0.05)', border:'1px solid rgba(248,113,113,0.2)', borderRadius:10, padding:'14px' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
                     <div>
                       <span style={{ color:'#f87171', fontFamily:'monospace', fontWeight:700, fontSize:12 }}>{bug.jiraKey}</span>
-                      <div style={{ color:'#f0f4ff', fontSize:13, fontWeight:600, marginTop:2 }}>{bug.summary}</div>
+                      <div style={{ color:T.text, fontSize:13, fontWeight:600, marginTop:2 }}>{bug.summary}</div>
                     </div>
                     <div style={{ display:'flex', gap:6, alignItems:'center' }}>
                       <span style={{ fontSize:11, padding:'2px 8px', borderRadius:20, background: bug.status==='Open'?'rgba(248,113,113,0.15)':'rgba(74,222,128,0.15)', color: bug.status==='Open'?'#f87171':'#4ade80' }}>{bug.status}</span>
-                      <button onClick={()=>{ const rows=[['Key','Summary','Severity','Priority','Status','Description'],[bug.jiraKey||'',bug.summary||'',bug.severity||'',bug.priority||'',bug.status||'',bug.description||'']]; dl(toCSV(rows),`Bug_${(bug.jiraKey||'bug').replace(/[^a-z0-9]/gi,'_')}.csv`,'text/csv;charset=utf-8'); }} style={{ background:'none', border:'none', color:'#6b7fa3', cursor:'pointer', padding:3 }}><Download size={12}/></button>
+                      <button onClick={()=>{ const rows=[['Key','Summary','Severity','Priority','Status','Description'],[bug.jiraKey||'',bug.summary||'',bug.severity||'',bug.priority||'',bug.status||'',bug.description||'']]; dl(toCSV(rows),`Bug_${(bug.jiraKey||'bug').replace(/[^a-z0-9]/gi,'_')}.csv`,'text/csv;charset=utf-8'); }} style={{ background:'none', border:'none', color:T.textMuted, cursor:'pointer', padding:3 }}><Download size={12}/></button>
                     </div>
                   </div>
-                  {bug.description && <p style={{ color:'#94a3b8', fontSize:12, marginBottom:8 }}>{bug.description}</p>}
+                  {bug.description && <p style={{ color:T.textSub, fontSize:12, marginBottom:8 }}>{bug.description}</p>}
                   <div style={{ display:'flex', gap:6, flexWrap:'wrap', fontSize:11 }}>
                     {[['Severity',bug.severity],['Priority',bug.priority],['Created',bug.createdAt?new Date(bug.createdAt).toLocaleDateString():'—']].map(([k,v])=>(
-                      <span key={k} style={{ padding:'2px 8px', borderRadius:20, border:'1px solid rgba(255,255,255,0.1)', color:'#94a3b8' }}>{k}: {v}</span>
+                      <span key={k} style={{ padding:'2px 8px', borderRadius:20, border:`1px solid ${T.border}`, color:T.textSub }}>{k}: {v}</span>
                     ))}
                   </div>
                 </div>
@@ -858,11 +860,11 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
           {/* ══ DOWNLOADS ══ */}
           {section === 'downloads' && (
             <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-              <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Download Reports</h2>
+              <h2 style={{ fontSize:18, fontWeight:800, color:T.text }}>Download Reports</h2>
 
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:12 }}>
                 {[
-                  { label:'HTML Report (with Screenshots)', icon:Eye, color:'#00d4aa', bg:'rgba(0,212,170,0.1)', desc:'Self-contained HTML — screenshots embedded, steps column included', action:()=>downloadHTML(tests,results,bugs,selectedTCols,filter) },
+                  { label:'HTML Report (with Screenshots)', icon:Eye, color:T.accent, bg:'rgba(0,212,170,0.1)', desc:'Self-contained HTML — screenshots embedded, steps column included', action:()=>downloadHTML(tests,results,bugs,selectedTCols,filter) },
                   { label:'Excel / CSV (3 files)', icon:FileSpreadsheet, color:'#4ade80', bg:'rgba(74,222,128,0.1)', desc:`Test Cases, Results, Bugs — with steps column`, action:dlAll },
                   { label:'PDF (via Print)', icon:Printer, color:'#f87171', bg:'rgba(248,113,113,0.1)', desc:'Formatted print-ready report — save as PDF', action:()=>downloadPDF(tests,results,bugs,selectedTCols,filter) },
                   { label:'Word (.doc)', icon:FileText, color:'#60a5fa', bg:'rgba(96,165,250,0.1)', desc:'Full report — opens in Word/Google Docs — steps column included', action:()=>downloadWord(tests,results,bugs,selectedTCols) },
@@ -873,13 +875,13 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
                 ].map(opt => {
                   const Icon = opt.icon;
                   return (
-                    <div key={opt.label} style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px', display:'flex', gap:14, alignItems:'flex-start' }}>
+                    <div key={opt.label} style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:14, padding:'18px', display:'flex', gap:14, alignItems:'flex-start' }}>
                       <div style={{ width:40, height:40, borderRadius:10, background:opt.bg, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
                         <Icon size={20} style={{ color:opt.color }}/>
                       </div>
                       <div style={{ flex:1 }}>
-                        <div style={{ color:'#f0f4ff', fontWeight:700, fontSize:13, marginBottom:4 }}>{opt.label}</div>
-                        <div style={{ color:'#6b7fa3', fontSize:11, marginBottom:10 }}>{opt.desc}</div>
+                        <div style={{ color:T.text, fontWeight:700, fontSize:13, marginBottom:4 }}>{opt.label}</div>
+                        <div style={{ color:T.textMuted, fontSize:11, marginBottom:10 }}>{opt.desc}</div>
                         <button onClick={opt.action} style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8, border:'none', background:opt.bg, color:opt.color, cursor:'pointer', fontSize:12, fontWeight:700, width:'100%', justifyContent:'center' }}>
                           <Download size={12}/> Download
                         </button>
@@ -890,8 +892,8 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
               </div>
 
               {/* Per-type CSV */}
-              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
-                <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700, marginBottom:12 }}>Download by Test Type</h3>
+              <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:14, padding:'18px' }}>
+                <h3 style={{ color:T.text, fontSize:14, fontWeight:700, marginBottom:12 }}>Download by Test Type</h3>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:8 }}>
                   {TYPES.map(type => {
                     const list = tests[type]||[];
@@ -903,7 +905,7 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
                           ...list.map(t=>[t.id||'',t.name||'',t.priority||'',(t.preconditions||''),(t.testSteps||'').split(' | ').map((s,i)=>`${i+1}. ${s}`).join('\n'),t.expectedResult||''])
                         ];
                         dl(toCSV(rows), `TestItNow_${type.toUpperCase()}.csv`, 'text/csv;charset=utf-8');
-                      }} style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 12px', borderRadius:9, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(255,255,255,0.04)', color:'#94a3b8', cursor:'pointer', fontSize:12, transition:'all 0.15s' }}
+                      }} style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 12px', borderRadius:9, border:`1px solid ${T.border}`, background:T.bgHover, color:T.textSub, cursor:'pointer', fontSize:12, transition:'all 0.15s' }}
                       onMouseEnter={e=>{ e.currentTarget.style.borderColor=TYPE_COLORS[type]+'55'; e.currentTarget.style.color=TYPE_COLORS[type]; }}
                       onMouseLeave={e=>{ e.currentTarget.style.borderColor='rgba(255,255,255,0.08)'; e.currentTarget.style.color='#94a3b8'; }}>
                         <Download size={12}/> <span style={{ textTransform:'uppercase', fontWeight:600 }}>{type}</span>
@@ -916,28 +918,28 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
 
               {/* Screenshots gallery */}
               {results.some(r=>r.screenshot) && (
-                <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
+                <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:14, padding:'18px' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-                    <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700 }}>Screenshots ({results.filter(r=>r.screenshot).length})</h3>
+                    <h3 style={{ color:T.text, fontSize:14, fontWeight:700 }}>Screenshots ({results.filter(r=>r.screenshot).length})</h3>
                     <button onClick={()=>results.filter(r=>r.screenshot).forEach((r,i)=>setTimeout(()=>dlScreenshot(r.screenshot,r.name),i*300))}
-                      style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(0,212,170,0.3)', background:'rgba(0,212,170,0.08)', color:'#00d4aa', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                      style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(0,212,170,0.3)', background:T.accentDim, color:T.accent, cursor:'pointer', fontSize:12, fontWeight:600 }}>
                       <Download size={12}/> Download All PNGs
                     </button>
                   </div>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:10 }}>
                     {results.filter(r=>r.screenshot).map((r,i)=>(
-                      <div key={i} style={{ position:'relative', borderRadius:8, overflow:'hidden', border:'1px solid rgba(0,212,170,0.12)' }}
+                      <div key={i} style={{ position:'relative', borderRadius:8, overflow:'hidden', border:`1px solid ${T.border}` }}
                         onMouseEnter={e=>e.currentTarget.querySelector('.ss-overlay').style.opacity='1'}
                         onMouseLeave={e=>e.currentTarget.querySelector('.ss-overlay').style.opacity='0'}>
                         <img src={r.screenshot} alt={r.name} style={{ width:'100%', display:'block', cursor:'pointer' }} onClick={()=>window.open(r.screenshot,'_blank')}/>
                         <div className="ss-overlay" style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.6)', opacity:0, transition:'opacity 0.2s', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8 }}>
                           <span style={{ color: r.status==='passed'?'#4ade80':'#f87171', fontSize:12, fontWeight:700 }}>{(r.status||'').toUpperCase()}</span>
-                          <button onClick={e=>{e.stopPropagation();dlScreenshot(r.screenshot,r.name);}} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:7, border:'none', background:'#00d4aa', color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                          <button onClick={e=>{e.stopPropagation();dlScreenshot(r.screenshot,r.name);}} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:7, border:'none', background:T.accent, color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
                             <Download size={11}/> PNG
                           </button>
                         </div>
-                        <div style={{ padding:'6px 8px', background:'#0d1530' }}>
-                          <p style={{ color:'#94a3b8', fontSize:11, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</p>
+                        <div style={{ padding:'6px 8px', background:T.sidebar }}>
+                          <p style={{ color:T.textSub, fontSize:11, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</p>
                         </div>
                       </div>
                     ))}
@@ -950,24 +952,24 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
           {/* ══ TEMPLATES ══ */}
           {section === 'templates' && (
             <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-              <h2 style={{ fontSize:18, fontWeight:800, color:'#f0f4ff' }}>Templates</h2>
+              <h2 style={{ fontSize:18, fontWeight:800, color:T.text }}>Templates</h2>
 
               {/* Upload */}
-              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
-                <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700, marginBottom:8 }}>Upload Your Template</h3>
-                <p style={{ color:'#6b7fa3', fontSize:12, marginBottom:14 }}>Upload a CSV with your column names — we'll map our data to your format and export.</p>
+              <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:14, padding:'18px' }}>
+                <h3 style={{ color:T.text, fontSize:14, fontWeight:700, marginBottom:8 }}>Upload Your Template</h3>
+                <p style={{ color:T.textMuted, fontSize:12, marginBottom:14 }}>Upload a CSV with your column names — we'll map our data to your format and export.</p>
                 <label style={{ display:'block', border:'2px dashed rgba(0,212,170,0.2)', borderRadius:12, padding:'28px', textAlign:'center', cursor:'pointer', marginBottom:12, transition:'border-color 0.2s' }}
                   onMouseEnter={e=>e.target.style.borderColor='rgba(0,212,170,0.5)'}
                   onMouseLeave={e=>e.target.style.borderColor='rgba(0,212,170,0.2)'}>
-                  <Upload size={28} style={{ color:'#6b7fa3', display:'block', margin:'0 auto 8px' }}/>
-                  <p style={{ color:'#94a3b8', fontSize:13 }}>Click to upload CSV template</p>
+                  <Upload size={28} style={{ color:T.textMuted, display:'block', margin:'0 auto 8px' }}/>
+                  <p style={{ color:T.textSub, fontSize:13 }}>Click to upload CSV template</p>
                   <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleTemplate} style={{ display:'none' }}/>
                 </label>
                 {templateName && (
-                  <div style={{ background:'rgba(0,212,170,0.08)', border:'1px solid rgba(0,212,170,0.25)', borderRadius:9, padding:'10px 14px', marginBottom:10, display:'flex', alignItems:'center', gap:10 }}>
-                    <CheckCircle size={15} style={{ color:'#00d4aa' }}/>
-                    <span style={{ color:'#00d4aa', fontSize:12, fontWeight:600 }}>Template ready: {templateName}</span>
-                    <button onClick={dlWithTemplate} style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:7, border:'none', background:'#00d4aa', color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                  <div style={{ background:T.accentDim, border:'1px solid rgba(0,212,170,0.25)', borderRadius:9, padding:'10px 14px', marginBottom:10, display:'flex', alignItems:'center', gap:10 }}>
+                    <CheckCircle size={15} style={{ color:T.accent }}/>
+                    <span style={{ color:T.accent, fontSize:12, fontWeight:600 }}>Template ready: {templateName}</span>
+                    <button onClick={dlWithTemplate} style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:7, border:'none', background:T.accent, color:'#0a0f1e', cursor:'pointer', fontSize:12, fontWeight:700 }}>
                       <Download size={11}/> Export
                     </button>
                   </div>
@@ -975,8 +977,8 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
               </div>
 
               {/* Download templates */}
-              <div style={{ background:'#111b3a', border:'1px solid rgba(0,212,170,0.1)', borderRadius:14, padding:'18px' }}>
-                <h3 style={{ color:'#f0f4ff', fontSize:14, fontWeight:700, marginBottom:12 }}>Download Template Files</h3>
+              <div style={{ background:T.bgCard, border:`1px solid ${T.border}`, borderRadius:14, padding:'18px' }}>
+                <h3 style={{ color:T.text, fontSize:14, fontWeight:700, marginBottom:12 }}>Download Template Files</h3>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                   {[
                     { label:'Test Cases Template', desc:'ID, Title, Type, Priority, Steps, Expected', fn:()=>dl('\uFEFF'+toCSV([['Test Case ID','Title','Description','Type','Priority','Preconditions','Test Steps','Test Data','Expected Result','URL'],['TC-001','Login with valid credentials','Test login','ui','Critical','Login page open','1. Enter email | 2. Enter password | 3. Click Login','Email: test@test.com','Login succeeds | Redirect to dashboard','https://app.com/login']]), 'TestCases_Template.csv','text/csv;charset=utf-8') },
@@ -984,10 +986,10 @@ export default function ReportsPage({ tests, results, bugs, onBack }) {
                     { label:'Bug Report Template', desc:'Key, Summary, Severity, Priority, Steps', fn:()=>dl('\uFEFF'+toCSV([['Bug Key','Summary','Severity','Priority','Status','Description'],['BUG-001','Login button broken on mobile','Major','High','Open','Login button unresponsive on iOS Safari']]), 'BugReport_Template.csv','text/csv;charset=utf-8') },
                     { label:'Import Template', desc:'Use to import existing test cases', fn:()=>dl('\uFEFF'+toCSV([['Test Case ID','Title','Description','Type','Priority','Test Steps','Expected Result'],['TC-001','Sample Test','Description','api','High','1. Do step 1 | 2. Do step 2','Result expected']]), 'Import_Template.csv','text/csv;charset=utf-8') },
                   ].map(t=>(
-                    <div key={t.label} style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'14px' }}>
-                      <div style={{ color:'#f0f4ff', fontSize:13, fontWeight:600, marginBottom:4 }}>{t.label}</div>
-                      <div style={{ color:'#6b7fa3', fontSize:11, marginBottom:10 }}>{t.desc}</div>
-                      <button onClick={t.fn} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.04)', color:'#94a3b8', cursor:'pointer', fontSize:12, width:'100%', justifyContent:'center' }}>
+                    <div key={t.label} style={{ background:T.bgHover, border:`1px solid ${T.border}`, borderRadius:10, padding:'14px' }}>
+                      <div style={{ color:T.text, fontSize:13, fontWeight:600, marginBottom:4 }}>{t.label}</div>
+                      <div style={{ color:T.textMuted, fontSize:11, marginBottom:10 }}>{t.desc}</div>
+                      <button onClick={t.fn} style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:7, border:`1px solid ${T.border}`, background:T.bgHover, color:T.textSub, cursor:'pointer', fontSize:12, width:'100%', justifyContent:'center' }}>
                         <Download size={11}/> Download
                       </button>
                     </div>
