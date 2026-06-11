@@ -248,12 +248,15 @@ export const testEngineService = {
     try {
       const data = await apiFetch(`${BASE}/run`, { method:'POST', body:{ tests:testList } });
       for (const result of data.results) {
-        await new Promise(r => setTimeout(r, 60));
+        await new Promise(r => setTimeout(r, 30));
         try {
-          const screenshotUrl = result.url || siteUrl || '';
-          result.screenshot = await captureScreenshot({ ...result, url: screenshotUrl });
+          // Backend now returns real screenshots from ScreenshotOne API.
+          // Only generate canvas fallback if backend didn't provide one.
+          if (!result.screenshot) {
+            result.screenshot = await captureScreenshot({ ...result, url: result.url || siteUrl || '' });
+          }
         } catch (ssErr) {
-          console.warn('[screenshot] Failed:', ssErr.message);
+          console.warn('[screenshot] Fallback failed:', ssErr.message);
           result.screenshot = null;
         }
         if (onTestComplete) onTestComplete(result);
