@@ -335,82 +335,16 @@ function analyzeUploadedFiles(files, label) {
 
 // ── Screenshot capture — takes real screenshot of the tested URL ──
 async function captureScreenshot(test) {
+  // Skip iframe entirely — CSP frame-ancestors blocks most sites.
+  // Go straight to the annotated canvas simulation which shows the URL.
   return new Promise(resolve => {
-    // Try to capture actual page via iframe (works for same-origin or CORS-friendly sites)
-    const url = test.url || '';
-    if (url && url.startsWith('http')) {
-      const iframe = document.createElement('iframe');
-      iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1280px;height:800px;border:none;visibility:hidden;';
-      iframe.sandbox = 'allow-scripts allow-same-origin allow-forms';
-      document.body.appendChild(iframe);
-
-      const cleanup = () => {
-        try { document.body.removeChild(iframe); } catch {}
-      };
-
-      // Timeout fallback - generate annotated canvas screenshot
-      const timer = setTimeout(() => {
-        cleanup();
-        resolve(generateAnnotatedScreenshot(test));
-      }, 5000);
-
-      iframe.onload = () => {
-        clearTimeout(timer);
-        try {
-          // Use html2canvas-like approach via canvas + iframe
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (!iframeDoc) { cleanup(); resolve(generateAnnotatedScreenshot(test)); return; }
-
-          // Draw iframe into canvas using drawWindow (Firefox) or fallback
-          const canvas = document.createElement('canvas');
-          canvas.width  = 1280;
-          canvas.height = 800;
-          const ctx = canvas.getContext('2d');
-
-          // Try drawWindow (only works in Firefox extensions, but worth trying)
-          if (ctx.drawWindow) {
-            ctx.drawWindow(iframe.contentWindow, 0, 0, 1280, 800, '#fff');
-            cleanup();
-            resolve(canvas.toDataURL('image/png'));
-          } else {
-            // Standard browsers: capture via foreignObject SVG trick
-            const svgData = `
-              <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800">
-                <foreignObject width="100%" height="100%">
-                  <div xmlns="http://www.w3.org/1999/xhtml">
-                    ${iframeDoc.documentElement?.outerHTML?.substring(0, 50000) || ''}
-                  </div>
-                </foreignObject>
-              </svg>`;
-            const img = new Image();
-            img.onload = () => {
-              ctx.drawImage(img, 0, 0);
-              cleanup();
-              resolve(canvas.toDataURL('image/png'));
-            };
-            img.onerror = () => {
-              cleanup();
-              resolve(generateAnnotatedScreenshot(test));
-            };
-            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
-          }
-        } catch (e) {
-          // Cross-origin blocked — generate annotated screenshot
-          cleanup();
-          resolve(generateAnnotatedScreenshot(test, url));
-        }
-      };
-
-      iframe.onerror = () => {
-        clearTimeout(timer);
-        cleanup();
-        resolve(generateAnnotatedScreenshot(test));
-      };
-
-      iframe.src = url;
-    } else {
-      resolve(generateAnnotatedScreenshot(test));
-    }
+    setTimeout(() => {
+      try {
+        resolve(generateAnnotatedScreenshot(test, test.url || ''));
+      } catch (e) {
+        resolve(null);
+      }
+    }, 0);
   });
 }
 
