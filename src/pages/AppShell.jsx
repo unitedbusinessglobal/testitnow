@@ -422,10 +422,10 @@ function AnalyzeHero({ onAnalyze, isGenerating, progress, progressMsg, totalTest
             {results.length > 0 && (
               <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
                 {[
-                  { label:'Total',   val:summary.total,              color:C.white },
-                  { label:'Passed',  val:summary.passed,             color:'#4ade80' },
-                  { label:'Failed',  val:summary.failed,             color:'#f87171' },
-                  { label:'Rate',    val:`${summary.passRate||0}%`,  color:C.teal },
+                  { label:'Total',   val:summary.total,  color:C.white },
+                  { label:'Passed',  val:summary.passed, color:'#4ade80' },
+                  { label:'Failed',  val:summary.failed, color:'#f87171' },
+                  { label:'Rate',    val:`${summary.total > 0 ? Math.round(summary.passed/summary.total*100) : 0}%`, color:C.teal },
                   { label:'Time',    val:`${((summary.duration||0)/1000).toFixed(1)}s`, color:C.blue },
                 ].map(s => (
                   <div key={s.label} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:'10px 18px', textAlign:'center', minWidth:80 }}>
@@ -646,6 +646,57 @@ function TestCasesPanel({ tests, activeTab, setActiveTab, onDelete, onRun, isRun
     .filter(t => !search || `${t.name||''}${t.id||''}`.toLowerCase().includes(search.toLowerCase()));
 
   return (
+    <>
+    {/* Test case detail modal — outside PanelShell so it isn't clipped */}
+    {expanded && (() => {
+      const test = shown.find(t => t.id === expanded);
+      if (!test) return null;
+      return (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:24, backdropFilter:'blur(6px)' }}
+          onClick={() => setExpanded(null)}>
+          <div style={{ background:C.card, borderRadius:16, width:'100%', maxWidth:720, maxHeight:'88vh', display:'flex', flexDirection:'column', overflow:'hidden', border:`1px solid ${C.border}`, boxShadow:'0 32px 80px rgba(0,0,0,0.5)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:12, flexShrink:0, background:C.sidebar }}>
+              <div style={{ width:4, height:32, borderRadius:2, background:TYPE_COLORS[test.type], flexShrink:0 }}/>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ color:C.white, fontSize:15, fontWeight:700, lineHeight:1.3 }}>{test.name}</div>
+                <div style={{ display:'flex', gap:8, marginTop:4, flexWrap:'wrap' }}>
+                  <span style={{ color:C.gray, fontSize:11, fontFamily:'monospace' }}>{test.id}</span>
+                  <span style={{ color:TYPE_COLORS[test.type], fontSize:11, textTransform:'uppercase', fontWeight:600 }}>{test.type}</span>
+                  <span style={{ fontSize:11, padding:'1px 7px', borderRadius:20, background: test.priority==='Critical'?'rgba(239,68,68,0.15)':'rgba(255,255,255,0.08)', color: test.priority==='Critical'?'#f87171':C.gray }}>{test.priority}</span>
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:6 }}>
+                <button onClick={() => { dl(generateScript(test,'playwright'), `${(test.id||'tc').replace(/[^a-z0-9]/gi,'_')}.spec.js`, 'text/javascript'); }}
+                  style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:`1px solid ${C.teal}44`, background:`${C.teal}18`, color:C.teal, cursor:'pointer', fontSize:12 }}>
+                  <Terminal size={12}/> Script
+                </button>
+                <button onClick={() => setExpanded(null)} style={{ background:'none', border:`1px solid ${C.border}`, borderRadius:7, color:C.gray, cursor:'pointer', padding:'6px 10px', fontSize:18, lineHeight:1 }}>✕</button>
+              </div>
+            </div>
+            <div style={{ overflowY:'auto', padding:'20px', display:'flex', flexDirection:'column', gap:14 }}>
+              {[['Description',test.description],['Preconditions',test.preconditions],['Test Steps',test.testSteps],['Test Data',test.testData],['Expected Result',test.expectedResult],['URL',test.url]]
+                .filter(([,v])=>v).map(([label,value])=>(
+                <div key={label}>
+                  <div style={{ color:C.gray, fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>{label}</div>
+                  <div style={{ color:C.white, fontSize:13, background:C.bg, borderRadius:8, padding:'12px 14px', lineHeight:1.7, border:`1px solid ${C.border}` }}>
+                    {label==='Test Steps'
+                      ? String(value).split(' | ').map((s,i)=>(
+                          <div key={i} style={{ display:'flex', gap:10, marginBottom:i<String(value).split(' | ').length-1?5:0 }}>
+                            <span style={{ color:C.teal, fontWeight:700, minWidth:20, fontFamily:'monospace', fontSize:12 }}>{i+1}.</span>
+                            <span>{s.replace(/^\d+\.\s*/,'')}</span>
+                          </div>
+                        ))
+                      : String(value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+
     <PanelShell title={`Test Cases (${totalTests})`} action={
       <button onClick={onRun} disabled={isRunning||!canRun} style={{ padding:'5px 12px', borderRadius:7, border:'none', cursor:'pointer', background:`linear-gradient(135deg,${C.teal},${C.blue})`, color:C.bg, fontSize:12, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
         <Play size={12}/> Run
@@ -699,65 +750,6 @@ function TestCasesPanel({ tests, activeTab, setActiveTab, onDelete, onRun, isRun
         </div>
       )}
 
-      {/* Test case detail modal — opens full screen overlay */}
-      {expanded && (() => {
-        const test = shown.find(t => t.id === expanded);
-        if (!test) return null;
-        return (
-          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', padding:24, backdropFilter:'blur(4px)' }}
-            onClick={() => setExpanded(null)}>
-            <div style={{ background:C.card, borderRadius:16, width:'100%', maxWidth:720, maxHeight:'85vh', display:'flex', flexDirection:'column', overflow:'hidden', border:`1px solid ${C.border}`, boxShadow:'0 24px 64px rgba(0,0,0,0.3)' }}
-              onClick={e => e.stopPropagation()}>
-              {/* Modal header */}
-              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:12, flexShrink:0, background:C.sidebar }}>
-                <div style={{ width:4, height:32, borderRadius:2, background:TYPE_COLORS[test.type], flexShrink:0 }}/>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ color:C.white, fontSize:15, fontWeight:700, lineHeight:1.3 }}>{test.name}</div>
-                  <div style={{ display:'flex', gap:8, marginTop:4 }}>
-                    <span style={{ color:C.gray, fontSize:11, fontFamily:'monospace' }}>{test.id}</span>
-                    <span style={{ color:TYPE_COLORS[test.type], fontSize:11, textTransform:'uppercase', fontWeight:600 }}>{test.type}</span>
-                    <span style={{ fontSize:11, padding:'1px 7px', borderRadius:20, background: test.priority==='Critical'?'rgba(239,68,68,0.15)':'rgba(255,255,255,0.08)', color: test.priority==='Critical'?'#f87171':C.gray }}>{test.priority}</span>
-                  </div>
-                </div>
-                <div style={{ display:'flex', gap:6 }}>
-                  <button onClick={() => setScripts({ test, fw:'playwright', code: generateScript(test,'playwright') })}
-                    style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:`1px solid ${C.teal}44`, background:`${C.teal}18`, color:C.teal, cursor:'pointer', fontSize:12, fontWeight:600 }}>
-                    <Terminal size={12}/> Script
-                  </button>
-                  <button onClick={() => setExpanded(null)}
-                    style={{ background:'none', border:`1px solid ${C.border}`, borderRadius:7, color:C.gray, cursor:'pointer', padding:'6px 10px', fontSize:14 }}>✕</button>
-                </div>
-              </div>
-              {/* Modal body — scrollable */}
-              <div style={{ overflowY:'auto', padding:'20px', display:'flex', flexDirection:'column', gap:16 }}>
-                {[
-                  ['Description', test.description],
-                  ['Preconditions', test.preconditions],
-                  ['Test Steps', test.testSteps],
-                  ['Test Data', test.testData],
-                  ['Expected Result', test.expectedResult],
-                  ['URL', test.url],
-                ].filter(([,v]) => v).map(([label, value]) => (
-                  <div key={label}>
-                    <div style={{ color:C.gray, fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>{label}</div>
-                    <div style={{ color:C.white, fontSize:13, background:C.bg, borderRadius:8, padding:'12px 14px', lineHeight:1.7, border:`1px solid ${C.border}` }}>
-                      {label === 'Test Steps'
-                        ? String(value).split(' | ').map((s,i) => (
-                            <div key={i} style={{ display:'flex', gap:10, marginBottom: i < String(value).split(' | ').length-1 ? 6 : 0 }}>
-                              <span style={{ color:C.teal, fontWeight:700, minWidth:20, fontFamily:'monospace', fontSize:12 }}>{i+1}.</span>
-                              <span>{s.replace(/^\d+\.\s*/,'')}</span>
-                            </div>
-                          ))
-                        : String(value)
-                      }
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Test list */}
       <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
@@ -794,6 +786,7 @@ function TestCasesPanel({ tests, activeTab, setActiveTab, onDelete, onRun, isRun
         ))}
       </div>
     </PanelShell>
+    </>
   );
 }
 
@@ -903,6 +896,65 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; back
   };
 
   return (
+    <>
+    {/* Result detail modal — rendered outside PanelShell so it isn't clipped */}
+    {expanded !== null && results[expanded] && (() => {
+      const r = results[expanded];
+      return (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:24, backdropFilter:'blur(6px)' }}
+          onClick={() => setExpanded(null)}>
+          <div style={{ background:C.card, borderRadius:16, width:'100%', maxWidth:820, maxHeight:'88vh', display:'flex', flexDirection:'column', overflow:'hidden', border:`1px solid ${C.border}`, boxShadow:'0 32px 80px rgba(0,0,0,0.5)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:12, background:C.sidebar, flexShrink:0 }}>
+              {r.status==='passed' ? <CheckCircle size={20} style={{ color:'#4ade80', flexShrink:0 }}/> : <XCircle size={20} style={{ color:'#f87171', flexShrink:0 }}/>}
+              <div style={{ flex:1 }}>
+                <div style={{ color:C.white, fontSize:15, fontWeight:700 }}>{r.name}</div>
+                <div style={{ color:C.gray, fontSize:12, marginTop:2 }}>
+                  <span style={{ color:r.status==='passed'?'#4ade80':'#f87171', fontWeight:700, textTransform:'uppercase' }}>{r.status}</span>
+                  <span style={{ margin:'0 8px' }}>·</span>{r.duration}ms
+                  {r.isRetest && <span style={{ marginLeft:8, color:C.blue }}>· Retest</span>}
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:6 }}>
+                {r.screenshot && <button onClick={() => dlScreenshot(r.screenshot, r.name)} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:`1px solid ${C.teal}44`, background:`${C.teal}18`, color:C.teal, cursor:'pointer', fontSize:12 }}><Download size={12}/> PNG</button>}
+                {r.status==='failed' && <>
+                  <button onClick={() => { onReportBug(r); setExpanded(null); }} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(248,113,113,0.3)', background:'rgba(248,113,113,0.1)', color:'#f87171', cursor:'pointer', fontSize:12 }}><Bug size={12}/> Bug</button>
+                  <button onClick={() => { onRetest(r); setExpanded(null); }} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:`1px solid ${C.blue}44`, background:`${C.blue}18`, color:C.blue, cursor:'pointer', fontSize:12 }}><RotateCcw size={12}/> Retest</button>
+                </>}
+                <button onClick={() => setExpanded(null)} style={{ background:'none', border:`1px solid ${C.border}`, borderRadius:7, color:C.gray, cursor:'pointer', padding:'6px 10px', fontSize:18, lineHeight:1 }}>✕</button>
+              </div>
+            </div>
+            <div style={{ overflowY:'auto', padding:'20px', display:'flex', flexDirection:'column', gap:16 }}>
+              {r.error && <div style={{ background:'rgba(248,113,113,0.1)', border:'1px solid rgba(248,113,113,0.3)', borderRadius:8, padding:'12px 14px' }}>
+                <div style={{ color:'#f87171', fontSize:11, fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Error</div>
+                <div style={{ color:'#fca5a5', fontSize:13 }}>{r.error}</div>
+              </div>}
+              {r.screenshot && (
+                <div>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <span style={{ color:C.gray, fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em' }}>📸 Screenshot</span>
+                    <button onClick={() => dlScreenshot(r.screenshot, r.name)} style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', borderRadius:7, border:`1px solid ${C.teal}44`, background:`${C.teal}18`, color:C.teal, cursor:'pointer', fontSize:11 }}>
+                      <Download size={11}/> Download PNG
+                    </button>
+                  </div>
+                  <img src={r.screenshot} alt={r.name} style={{ width:'100%', borderRadius:10, border:`1px solid ${C.border}`, cursor:'pointer', display:'block' }} onClick={() => window.open(r.screenshot, '_blank')}/>
+                  <p style={{ color:C.gray, fontSize:11, marginTop:6, textAlign:'center' }}>Click image to open full size</p>
+                </div>
+              )}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+                {[['Type',(r.type||'').toUpperCase()],['Duration',`${r.duration||0}ms`],['Timestamp',r.timestamp?new Date(r.timestamp).toLocaleTimeString():'—']].map(([k,v])=>(
+                  <div key={k} style={{ background:C.bg, borderRadius:8, padding:'10px', border:`1px solid ${C.border}` }}>
+                    <div style={{ color:C.gray, fontSize:10, fontWeight:600, textTransform:'uppercase', marginBottom:3 }}>{k}</div>
+                    <div style={{ color:C.white, fontSize:13, fontWeight:600 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+
     <PanelShell title={`Results (${results.length})`} action={
       <button onClick={downloadHTMLReport} disabled={!results.length} style={{ padding:'5px 10px', borderRadius:7, border:'none', cursor:'pointer', background:`rgba(0,212,170,0.1)`, color:C.teal, fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
         <Download size={11}/> HTML
@@ -929,69 +981,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; back
         ))}
       </div>
 
-      {/* Result detail modal */}
-      {expanded !== null && results[expanded] && (() => {
-        const r = results[expanded];
-        return (
-          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', padding:24, backdropFilter:'blur(4px)' }}
-            onClick={() => setExpanded(null)}>
-            <div style={{ background:C.card, borderRadius:16, width:'100%', maxWidth:760, maxHeight:'85vh', display:'flex', flexDirection:'column', overflow:'hidden', border:`1px solid ${C.border}`, boxShadow:'0 24px 64px rgba(0,0,0,0.3)' }}
-              onClick={e => e.stopPropagation()}>
-              {/* Header */}
-              <div style={{ padding:'16px 20px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:12, background:C.sidebar, flexShrink:0 }}>
-                {r.status==='passed' ? <CheckCircle size={20} style={{ color:'#4ade80', flexShrink:0 }}/> : <XCircle size={20} style={{ color:'#f87171', flexShrink:0 }}/>}
-                <div style={{ flex:1 }}>
-                  <div style={{ color:C.white, fontSize:15, fontWeight:700 }}>{r.name}</div>
-                  <div style={{ color:C.gray, fontSize:12, marginTop:2 }}>
-                    <span style={{ color:r.status==='passed'?'#4ade80':'#f87171', fontWeight:700, textTransform:'uppercase' }}>{r.status}</span>
-                    <span style={{ margin:'0 8px' }}>·</span>{r.duration}ms
-                    {r.isRetest && <span style={{ marginLeft:8, color:C.blue }}>· Retest</span>}
-                  </div>
-                </div>
-                <div style={{ display:'flex', gap:6 }}>
-                  {r.screenshot && <button onClick={() => dlScreenshot(r.screenshot, r.name)} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:`1px solid ${C.teal}44`, background:`${C.teal}18`, color:C.teal, cursor:'pointer', fontSize:12 }}><Download size={12}/> PNG</button>}
-                  {r.status==='failed' && <>
-                    <button onClick={() => { onReportBug(r); setExpanded(null); }} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:'1px solid rgba(248,113,113,0.3)', background:'rgba(248,113,113,0.1)', color:'#f87171', cursor:'pointer', fontSize:12 }}><Bug size={12}/> Bug</button>
-                    <button onClick={() => { onRetest(r); setExpanded(null); }} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:7, border:`1px solid ${C.blue}44`, background:`${C.blue}18`, color:C.blue, cursor:'pointer', fontSize:12 }}><RotateCcw size={12}/> Retest</button>
-                  </>}
-                  <button onClick={() => setExpanded(null)} style={{ background:'none', border:`1px solid ${C.border}`, borderRadius:7, color:C.gray, cursor:'pointer', padding:'6px 10px' }}>✕</button>
-                </div>
-              </div>
-              {/* Body */}
-              <div style={{ overflowY:'auto', padding:'20px', display:'flex', flexDirection:'column', gap:16 }}>
-                {r.error && (
-                  <div style={{ background:'rgba(248,113,113,0.1)', border:'1px solid rgba(248,113,113,0.3)', borderRadius:8, padding:'12px 14px' }}>
-                    <div style={{ color:'#f87171', fontSize:11, fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Error</div>
-                    <div style={{ color:'#fca5a5', fontSize:13 }}>{r.error}</div>
-                  </div>
-                )}
-                {r.screenshot && (
-                  <div>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                      <div style={{ color:C.gray, fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em' }}>📸 Screenshot — {r.name}</div>
-                      <button onClick={() => dlScreenshot(r.screenshot, r.name)} style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', borderRadius:7, border:`1px solid ${C.teal}44`, background:`${C.teal}18`, color:C.teal, cursor:'pointer', fontSize:11 }}>
-                        <Download size={11}/> Download PNG
-                      </button>
-                    </div>
-                    <img src={r.screenshot} alt={r.name}
-                      style={{ width:'100%', borderRadius:10, border:`1px solid ${C.border}`, cursor:'pointer', display:'block' }}
-                      onClick={() => window.open(r.screenshot, '_blank')}/>
-                    <p style={{ color:C.gray, fontSize:11, marginTop:6, textAlign:'center' }}>Click to open full size · Shows the page being tested</p>
-                  </div>
-                )}
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
-                  {[['Type',(r.type||'').toUpperCase()],['Duration',`${r.duration||0}ms`],['Timestamp',r.timestamp?new Date(r.timestamp).toLocaleTimeString():'—']].map(([k,v])=>(
-                    <div key={k} style={{ background:C.bg, borderRadius:8, padding:'10px', border:`1px solid ${C.border}` }}>
-                      <div style={{ color:C.gray, fontSize:10, fontWeight:600, textTransform:'uppercase', marginBottom:3 }}>{k}</div>
-                      <div style={{ color:C.white, fontSize:13, fontWeight:600 }}>{v}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Results list */}
       <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
@@ -1023,6 +1012,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; back
         ))}
       </div>
     </PanelShell>
+    </>
   );
 }
 
