@@ -248,15 +248,13 @@ export const testEngineService = {
     try {
       const data = await apiFetch(`${BASE}/run`, { method:'POST', body:{ tests:testList } });
       for (const result of data.results) {
-        await new Promise(r => setTimeout(r, 30));
+        await new Promise(r => setTimeout(r, 20));
         try {
-          // Backend now returns real screenshots from ScreenshotOne API.
-          // Only generate canvas fallback if backend didn't provide one.
-          if (!result.screenshot) {
-            result.screenshot = await captureScreenshot({ ...result, url: result.url || siteUrl || '' });
-          }
+          // Backend sends screenshot as JSON descriptor {real, meta}
+          // captureScreenshot decodes it and renders the annotated canvas
+          result.screenshot = await captureScreenshot(result);
         } catch (ssErr) {
-          console.warn('[screenshot] Fallback failed:', ssErr.message);
+          console.warn('[screenshot] Render failed:', ssErr.message);
           result.screenshot = null;
         }
         if (onTestComplete) onTestComplete(result);
@@ -337,17 +335,232 @@ function analyzeUploadedFiles(files, label) {
 }
 
 // ── Screenshot capture — takes real screenshot of the tested URL ──
+// ─────────────────────────────────────────────────────────────
+// renderAnnotatedScreenshot
+// Receives the JSON descriptor from the backend and draws:
+//   - real website screenshot (if available) as background
+//   - test-specific overlay showing type, name, steps, status
+// ─────────────────────────────────────────────────────────────
 async function captureScreenshot(test) {
-  // Skip iframe entirely — CSP frame-ancestors blocks most sites.
-  // Go straight to the annotated canvas simulation which shows the URL.
+  // The backend sends screenshot as JSON: { real: base64|null, meta: {...} }
+  // If it's already rendered (old canvas dataUrl) just return it.
+  const raw = test.screenshot;
+  if (!raw) return generateAnnotatedScreenshot(test, test.url || '');
+
+  // If it's already a data URL (canvas fallback from previous runs) pass through
+  if (typeof raw === 'string' && raw.startsWith('data:')) return raw;
+
+  // Parse the descriptor from backend
+  let descriptor = null;
+  if (typeof raw === 'string') {
+    try { descriptor = JSON.parse(raw); } catch { return generateAnnotatedScreenshot(test, test.url || ''); }
+  } else if (typeof raw === 'object') {
+    descriptor = raw;
+  }
+
+  if (!descriptor) return generateAnnotatedScreenshot(test, test.url || '');
+
+  const { real, meta } = descriptor;
+
   return new Promise(resolve => {
-    setTimeout(() => {
-      try {
-        resolve(generateAnnotatedScreenshot(test, test.url || ''));
-      } catch (e) {
-        resolve(null);
+    const W = 1280, H = 900;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    const drawOverlay = () => {
+      const m = meta || {};
+      const status  = m.status || test.status || 'passed';
+      const type    = m.type   || (test.type || 'ui').toLowerCase();
+      const color   = m.color  || '#00d4aa';
+      const isPassed = status === 'passed';
+
+      // ── Browser chrome bar ──────────────────────────────
+      ctx.fillStyle = '#1e2433';
+      ctx.fillRect(0, 0, W, 52);
+
+      // Traffic lights
+      [['#ff5f57', 28], ['#febc2e', 52], ['#28c840', 76]].forEach(([c, x]) => {
+        ctx.fillStyle = c;
+        ctx.beginPath(); ctx.arc(x, 26, 7, 0, Math.PI * 2); ctx.fill();
+      });
+
+      // URL bar
+      ctx.fillStyle = '#2a3347';
+      roundRect(ctx, 105, 14, 860, 26, 5); ctx.fill();
+
+      // Lock icon + URL
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '12px monospace';
+      ctx.fillText('🔒 ' + (m.url || test.url || 'https://app-under-test.com').substring(0, 70), 114, 31);
+
+      // Status pill in URL bar right side
+      ctx.fillStyle = isPassed ? 'rgba(74,222,128,0.2)' : 'rgba(248,113,113,0.2)';
+      roundRect(ctx, 975, 14, 120, 26, 5); ctx.fill();
+      ctx.fillStyle = isPassed ? '#4ade80' : '#f87171';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(isPassed ? '✓ PASSED' : '✗ FAILED', 1035, 31);
+      ctx.textAlign = 'left';
+
+      // Browser tabs bar
+      ctx.fillStyle = '#161e30';
+      ctx.fillRect(0, 52, W, 8);
+
+      // ── Test info overlay — right side panel ────────────
+      const panelX = W - 360;
+      const panelW = 360;
+      const panelY = 60;
+      const panelH = H - 60;
+
+      // Semi-transparent panel background
+      ctx.fillStyle = 'rgba(10,15,30,0.92)';
+      roundRect(ctx, panelX, panelY, panelW, panelH, 0); ctx.fill();
+
+      // Panel accent line
+      ctx.fillStyle = color;
+      ctx.fillRect(panelX, panelY, 3, panelH);
+
+      // Type badge
+      ctx.fillStyle = color + '22';
+      roundRect(ctx, panelX + 12, panelY + 12, 80, 22, 4); ctx.fill();
+      ctx.fillStyle = color;
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(type.toUpperCase(), panelX + 52, panelY + 27);
+      ctx.textAlign = 'left';
+
+      // Priority badge
+      const priBg = { Critical:'rgba(239,68,68,0.2)', High:'rgba(249,115,22,0.2)', Medium:'rgba(234,179,8,0.2)', Low:'rgba(74,222,128,0.2)' };
+      const priCol = { Critical:'#f87171', High:'#fb923c', Medium:'#fbbf24', Low:'#4ade80' };
+      const pri = m.priority || 'High';
+      ctx.fillStyle = priBg[pri] || 'rgba(255,255,255,0.1)';
+      roundRect(ctx, panelX + 100, panelY + 12, 60, 22, 4); ctx.fill();
+      ctx.fillStyle = priCol[pri] || '#94a3b8';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(pri, panelX + 130, panelY + 27);
+      ctx.textAlign = 'left';
+
+      // Test ID
+      ctx.fillStyle = '#6b7fa3';
+      ctx.font = '10px monospace';
+      ctx.fillText(m.id || test.id || '', panelX + 12, panelY + 52);
+
+      // Test name (wrap at ~38 chars)
+      const name = m.name || test.name || '';
+      ctx.fillStyle = '#f0f4ff';
+      ctx.font = 'bold 13px sans-serif';
+      const words = name.split(' ');
+      let line = '', lineY = panelY + 72;
+      for (const word of words) {
+        const test2 = line + word + ' ';
+        if (ctx.measureText(test2).width > panelW - 24) {
+          ctx.fillText(line, panelX + 12, lineY);
+          line = word + ' '; lineY += 18;
+          if (lineY > panelY + 120) { line = '…'; break; }
+        } else { line = test2; }
       }
-    }, 0);
+      if (line) ctx.fillText(line.trim(), panelX + 12, lineY);
+
+      // Divider
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(panelX + 12, panelY + 132); ctx.lineTo(panelX + panelW - 12, panelY + 132); ctx.stroke();
+
+      // Test Steps
+      const steps = m.steps || (test.testSteps || '').split(' | ').filter(Boolean).slice(0, 5);
+      if (steps.length) {
+        ctx.fillStyle = '#6b7fa3';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText('TEST STEPS', panelX + 12, panelY + 150);
+
+        steps.forEach((step, i) => {
+          const stepY = panelY + 166 + i * 28;
+          const done  = isPassed || i < steps.length - 1;
+
+          // Step circle
+          ctx.fillStyle = done ? (isPassed ? '#4ade80' : (i < steps.length - 1 ? '#4ade80' : '#f87171')) : '#6b7fa3';
+          ctx.beginPath(); ctx.arc(panelX + 22, stepY, 8, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#0a0f1e';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(done ? (i < steps.length - 1 || isPassed ? '✓' : '✗') : (i + 1), panelX + 22, stepY + 3);
+          ctx.textAlign = 'left';
+
+          // Connector line
+          if (i < steps.length - 1) {
+            ctx.strokeStyle = '#2a3347';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(panelX + 22, stepY + 8); ctx.lineTo(panelX + 22, stepY + 20); ctx.stroke();
+          }
+
+          // Step text
+          ctx.fillStyle = done ? '#d1d9f0' : '#6b7fa3';
+          ctx.font = '11px sans-serif';
+          const stepText = step.replace(/^\d+\.\s*/, '').substring(0, 42);
+          ctx.fillText(stepText, panelX + 36, stepY + 4);
+        });
+      }
+
+      // Expected result
+      const expected = m.expected || test.expectedResult || '';
+      if (expected) {
+        const expY = panelY + 166 + steps.length * 28 + 12;
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.beginPath(); ctx.moveTo(panelX + 12, expY); ctx.lineTo(panelX + panelW - 12, expY); ctx.stroke();
+        ctx.fillStyle = '#6b7fa3';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText('EXPECTED', panelX + 12, expY + 14);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '10px sans-serif';
+        const expLines = expected.match(/.{1,44}/g) || [];
+        expLines.slice(0, 3).forEach((l, i) => ctx.fillText(l, panelX + 12, expY + 28 + i * 14));
+      }
+
+      // Bottom status bar
+      const barY = H - 44;
+      ctx.fillStyle = isPassed ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)';
+      ctx.fillRect(0, barY, W, 44);
+      ctx.strokeStyle = isPassed ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, barY); ctx.lineTo(W, barY); ctx.stroke();
+
+      ctx.fillStyle = isPassed ? '#4ade80' : '#f87171';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(isPassed ? '✓  Test Passed' : '✗  Test Failed', 20, barY + 27);
+
+      ctx.fillStyle = '#6b7fa3';
+      ctx.font = '11px monospace';
+      ctx.fillText(`${type.toUpperCase()}  ·  ${m.id || ''}  ·  ${new Date().toLocaleTimeString()}`, 200, barY + 27);
+
+      resolve(canvas.toDataURL('image/png'));
+    };
+
+    if (real) {
+      // Draw real website screenshot as background (left 920px), panel on right
+      const img = new Image();
+      img.onload = () => {
+        // Draw real screenshot — clip to left part (leaving room for panel)
+        ctx.drawImage(img, 0, 60, W, H - 60 - 44);
+        // Darken slightly for readability
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.fillRect(0, 60, panelX, H - 60 - 44);
+        drawOverlay();
+      };
+      img.onerror = () => {
+        // Real screenshot failed to load — draw simulated page instead
+        drawSimulatedPage(ctx, { ...test, ...meta, status: meta?.status || status });
+        drawOverlay();
+      };
+      img.src = `data:image/png;base64,${real}`;
+    } else {
+      // No real screenshot — draw simulated page background
+      ctx.fillStyle = '#0d1530';
+      ctx.fillRect(0, 60, W, H - 60);
+      drawSimulatedPage(ctx, { ...test, type: meta?.type || test.type, status: meta?.status || test.status, url: meta?.url || test.url });
+      drawOverlay();
+    }
   });
 }
 

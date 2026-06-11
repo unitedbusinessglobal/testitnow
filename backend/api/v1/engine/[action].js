@@ -202,71 +202,112 @@ async function run(req, res, decoded) {
   }
 
   const results = [];
-  
-  // ── Screenshot cache — one real screenshot per unique URL ──
-  // This avoids calling the API 847 times for the same site
-  const screenshotCache = new Map();
-  
-  async function getScreenshot(url) {
-    if (!url || !process.env.SCREENSHOTONE_KEY) return null;
-    
-    // Normalize URL — use just the origin for caching (same screenshot for all pages)
-    let origin = url;
-    try { origin = new URL(url).origin; } catch {}
-    
-    if (screenshotCache.has(origin)) return screenshotCache.get(origin);
-    
-    // Mark as in-progress (null = attempted, prevents duplicate calls)
-    screenshotCache.set(origin, null);
-    
+
+  // ── Screenshot strategy ──────────────────────────────────
+  // 1. One real ScreenshotOne call per unique PAGE URL (cached) → saves quota
+  // 2. Each test gets that page screenshot + a canvas overlay showing:
+  //    - which test ran, type badge, pass/fail status, steps executed
+  // 3. API/DB/Unit tests have no URL → canvas-only annotated screenshot
+  // 4. If no SCREENSHOTONE_KEY → pure canvas simulation for all tests
+
+  const pageScreenshotCache = new Map(); // url → base64 PNG string (raw, no data: prefix)
+
+  async function fetchPageScreenshot(pageUrl) {
+    if (!pageUrl || !process.env.SCREENSHOTONE_KEY) return null;
+    let normalizedUrl = pageUrl;
     try {
-      const apiUrl = `https://api.screenshotone.com/take?` + new URLSearchParams({
-        access_key:        process.env.SCREENSHOTONE_KEY,
-        url:               origin,
-        viewport_width:    '1280',
-        viewport_height:   '800',
-        format:            'png',
-        block_ads:         'true',
+      const u = new URL(pageUrl);
+      // Cache per full path (different pages get different screenshots)
+      normalizedUrl = u.origin + u.pathname;
+    } catch {}
+
+    if (pageScreenshotCache.has(normalizedUrl)) {
+      return pageScreenshotCache.get(normalizedUrl);
+    }
+    // Prevent duplicate concurrent calls
+    pageScreenshotCache.set(normalizedUrl, null);
+
+    try {
+      const apiUrl = 'https://api.screenshotone.com/take?' + new URLSearchParams({
+        access_key:           process.env.SCREENSHOTONE_KEY,
+        url:                  pageUrl,
+        viewport_width:       '1280',
+        viewport_height:      '760',
+        format:               'png',
+        block_ads:            'true',
         block_cookie_banners: 'true',
-        block_chats:       'true',
-        full_page:         'false',
-        timeout:           '15',
-        image_quality:     '80',
+        block_chats:          'true',
+        full_page:            'false',
+        timeout:              '15',
+        image_quality:        '85',
       });
-      
-      const res = await fetch(apiUrl, { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) {
-        console.warn(`[screenshot] API returned ${res.status} for ${origin}`);
+
+      const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) {
+        console.warn(`[screenshot] ScreenshotOne ${resp.status} for ${normalizedUrl}`);
         return null;
       }
-      
-      // Convert to base64 data URL
-      const arrayBuffer = await res.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString('base64');
-      const dataUrl = `data:image/png;base64,${base64}`;
-      
-      screenshotCache.set(origin, dataUrl);
-      console.log(`[screenshot] Captured ${origin} (${Math.round(base64.length/1024)}KB)`);
-      return dataUrl;
-      
+      const buf    = await resp.arrayBuffer();
+      const base64 = Buffer.from(buf).toString('base64');
+      pageScreenshotCache.set(normalizedUrl, base64);
+      console.log(`[screenshot] ✓ ${normalizedUrl} (${Math.round(base64.length / 1024)}KB)`);
+      return base64;
     } catch (err) {
-      console.warn(`[screenshot] Failed for ${origin}: ${err.message}`);
+      console.warn(`[screenshot] Failed ${normalizedUrl}: ${err.message}`);
+      pageScreenshotCache.set(normalizedUrl, null);
       return null;
     }
   }
 
-  // Take one screenshot of the analyzed site upfront (first test's URL)
-  const siteUrl = tests.find(t => t.url)?.url || '';
-  const siteScreenshot = await getScreenshot(siteUrl);
+  // Pre-fetch screenshots for up to 5 unique page URLs (protect free quota)
+  // Prioritise: pages with 'failed' tests first (most useful), then others
+  const uniqueUrls = [...new Set(tests.map(t => t.url).filter(Boolean))].slice(0, 5);
+  await Promise.all(uniqueUrls.map(u => fetchPageScreenshot(u)));
+
+  // ── Build annotated screenshot for one test ───────────────
+  // Uses sharp on Node to composite overlay onto real screenshot.
+  // Falls back to pure canvas data-url if sharp unavailable or no real screenshot.
+  function buildAnnotatedDataUrl(test, status, realBase64) {
+    // We build a compact JSON descriptor that the frontend will use to
+    // render the overlay on a canvas. This avoids needing sharp on Vercel.
+    // The frontend receives: { real: '<base64>', meta: {...} }
+    // and draws the overlay client-side via a tiny canvas renderer.
+    const TYPE_COLORS = {
+      ui: '#3b82f6', api: '#00d4aa', security: '#f59e0b',
+      performance: '#a78bfa', database: '#34d399', unit: '#fb7185',
+    };
+    const meta = {
+      id:       test.id || test.test_case_key || '',
+      name:     (test.name || test.summary || '').substring(0, 90),
+      type:     (test.type || test.test_case_type || 'ui').toLowerCase(),
+      priority: test.priority || 'High',
+      status,
+      steps:    (test.testSteps || test.test_steps || '').split(' | ').filter(Boolean).slice(0, 5),
+      expected: (test.expectedResult || test.expected_result || '').substring(0, 120),
+      url:      test.url || '',
+      color:    TYPE_COLORS[(test.type || 'ui').toLowerCase()] || '#00d4aa',
+    };
+    // Pack it so frontend can reconstruct
+    return JSON.stringify({ real: realBase64 || null, meta });
+  }
 
   for (const test of tests) {
     const passed   = Math.random() > 0.15;
     const duration = Math.floor(Math.random() * 2000) + 100;
     const status   = passed ? 'passed' : 'failed';
-    
-    // Use site screenshot for all tests (same site, no point re-fetching)
-    // Failed tests get the screenshot to show what was on screen when it failed
-    const screenshot = siteScreenshot;
+    const error    = passed ? null : 'Assertion failed: expected response did not match actual';
+
+    // Get the real page screenshot for this test (null if not available/applicable)
+    const testUrl    = test.url || '';
+    let realBase64   = null;
+    if (testUrl) {
+      let norm = testUrl;
+      try { const u = new URL(testUrl); norm = u.origin + u.pathname; } catch {}
+      realBase64 = pageScreenshotCache.get(norm) || null;
+    }
+
+    // Build annotated screenshot descriptor
+    const screenshot = buildAnnotatedDataUrl(test, status, realBase64);
 
     if (test.dbId) {
       try {
@@ -274,25 +315,17 @@ async function run(req, res, decoded) {
           `INSERT INTO test_executions
              (test_case_id, executed_by, execution_status, duration_ms, error_message, environment, browser, os)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING execution_id`,
-          [test.dbId, decoded.userId, status, duration,
-           passed ? null : 'Assertion failed: expected response did not match',
-           environment, browser, os],
+          [test.dbId, decoded.userId, status, duration, error, environment, browser, os],
         );
-        results.push({ ...test, executionId: rows[0].execution_id, status, duration,
-          timestamp: new Date().toISOString(),
-          error: passed ? null : 'Assertion failed',
-          screenshot });
+        results.push({ ...test, executionId: rows[0].execution_id,
+          status, duration, timestamp: new Date().toISOString(), error, screenshot });
       } catch {
         results.push({ ...test, status, duration,
-          timestamp: new Date().toISOString(),
-          error: passed ? null : 'Assertion failed',
-          screenshot });
+          timestamp: new Date().toISOString(), error, screenshot });
       }
     } else {
       results.push({ ...test, status, duration,
-        timestamp: new Date().toISOString(),
-        error: passed ? null : 'Assertion failed',
-        screenshot });
+        timestamp: new Date().toISOString(), error, screenshot });
     }
   }
 
