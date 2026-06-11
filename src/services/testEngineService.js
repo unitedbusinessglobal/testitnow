@@ -341,27 +341,127 @@ function analyzeUploadedFiles(files, label) {
 //   - real website screenshot (if available) as background
 //   - test-specific overlay showing type, name, steps, status
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// captureScreenshot
+// Priority order:
+//   1. Iframe capture (real pixel-perfect screenshot of live site)
+//      — silently skipped if CSP/CORS blocks it (no console error)
+//   2. Backend descriptor with ScreenshotOne real photo + canvas overlay
+//   3. Pure canvas simulation (type-specific page mock + test overlay)
+// ─────────────────────────────────────────────────────────────
 async function captureScreenshot(test) {
-  // The backend sends screenshot as JSON: { real: base64|null, meta: {...} }
-  // If it's already rendered (old canvas dataUrl) just return it.
-  const raw = test.screenshot;
-  if (!raw) return generateAnnotatedScreenshot(test, test.url || '');
+  const url = test.url || '';
 
-  // If it's already a data URL (canvas fallback from previous runs) pass through
-  if (typeof raw === 'string' && raw.startsWith('data:')) return raw;
-
-  // Parse the descriptor from backend
-  let descriptor = null;
-  if (typeof raw === 'string') {
-    try { descriptor = JSON.parse(raw); } catch { return generateAnnotatedScreenshot(test, test.url || ''); }
-  } else if (typeof raw === 'object') {
-    descriptor = raw;
+  // ── Step 1: Try iframe capture ──────────────────────────
+  // Works for same-origin or sites that allow framing.
+  // Silently times out in 3s if CSP blocks it — no crash, no error.
+  if (url && url.startsWith('http')) {
+    const iframeResult = await tryIframeCapture(url, test).catch(() => null);
+    if (iframeResult) return iframeResult;
   }
 
-  if (!descriptor) return generateAnnotatedScreenshot(test, test.url || '');
+  // ── Step 2: Use backend descriptor (ScreenshotOne + overlay) ──
+  const raw = test.screenshot;
+  if (raw && typeof raw === 'string' && !raw.startsWith('data:')) {
+    try {
+      const descriptor = JSON.parse(raw);
+      if (descriptor && (descriptor.real || descriptor.meta)) {
+        return await renderDescriptor(descriptor, test);
+      }
+    } catch {}
+  }
+  if (raw && typeof raw === 'string' && raw.startsWith('data:')) return raw;
 
+  // ── Step 3: Pure canvas fallback ───────────────────────
+  return generateAnnotatedScreenshot(test, url);
+}
+
+// ── Iframe capture — returns dataUrl or null ──────────────
+function tryIframeCapture(url, test) {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+
+    // Create hidden iframe
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = [
+      'position:fixed', 'left:-9999px', 'top:-9999px',
+      'width:1280px', 'height:800px', 'border:none',
+      'visibility:hidden', 'pointer-events:none', 'z-index:-1',
+    ].join(';');
+
+    // Suppress CSP violation from appearing as a red error in console
+    // by listening for the securitypolicyviolation event and swallowing it
+    const cspHandler = (e) => {
+      if (e.blockedURI || e.violatedDirective?.includes('frame')) {
+        done(null); // CSP blocked — fall through
+      }
+    };
+    document.addEventListener('securitypolicyviolation', cspHandler, { once: true });
+
+    const cleanup = () => {
+      document.removeEventListener('securitypolicyviolation', cspHandler);
+      clearTimeout(timer);
+      try { if (iframe.parentNode) document.body.removeChild(iframe); } catch {}
+    };
+
+    // 3-second timeout — if CSP doesn't fire an event just time out
+    const timer = setTimeout(() => done(null), 3000);
+
+    iframe.onload = () => {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        // If we can read the document title, CORS isn't blocking us
+        const title = iframeDoc?.title;
+        if (!iframeDoc || !iframeDoc.body) { done(null); return; }
+
+        // Try to draw into canvas via html2canvas-style SVG foreignObject
+        const html = iframeDoc.documentElement?.outerHTML || '';
+        if (!html || html.length < 100) { done(null); return; }
+
+        const W = 1280, H = 800;
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+
+        const svgSrc = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+            <foreignObject width="100%" height="100%">
+              <div xmlns="http://www.w3.org/1999/xhtml" style="width:${W}px;height:${H}px;overflow:hidden">
+                ${html.substring(0, 80000)}
+              </div>
+            </foreignObject>
+          </svg>`;
+
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0);
+          done(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => done(null);
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgSrc);
+
+      } catch (e) {
+        // Cross-origin read blocked — that's expected, fall through
+        done(null);
+      }
+    };
+
+    iframe.onerror = () => done(null);
+
+    document.body.appendChild(iframe);
+    iframe.src = url;
+  });
+}
+
+// ── Render backend descriptor → annotated canvas ──────────
+async function renderDescriptor(descriptor, test) {
   const { real, meta } = descriptor;
-
   return new Promise(resolve => {
     const W = 1280, H = 900;
     const canvas = document.createElement('canvas');
